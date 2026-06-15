@@ -312,6 +312,13 @@
             </div>
           </div>
           <div class="fg"><label>Remarks</label><textarea id="gFldRemarks" placeholder="Optional notes..."></textarea></div>
+          <div class="trow mt">
+            <div>
+              <div class="tlbl">Also register in EFRIS goods registry</div>
+              <div class="tdsc">Requires EFRIS credentials in Settings. Optional — you can sync to Manager.io only.</div>
+            </div>
+            <div class="tog" id="gTogEfris" onclick="tg('gTogEfris','gRegEfris')"></div>
+          </div>
           <div id="gSyncStatus"></div>
           <div class="row mt">
             <button class="btn bo" style="width:auto;flex:0 0 auto;" onclick="gGoStep(4)">&larr; Back</button>
@@ -405,7 +412,7 @@
 const RELAY = window.location.protocol + '//' + window.location.host;
 const SKEY = 'efris_v3';
 let CFG={}, INV=null, DKEY=null, MGR_EP=null, MGR_TK=null;
-const TG={vatReg:false,sandbox:true};
+const TG={vatReg:false,sandbox:true,gRegEfris:false};
 let obStep=1;
 
 function ld(){ try{ const r=localStorage.getItem(SKEY); return r?JSON.parse(r):null; }catch(e){return null;} }
@@ -818,14 +825,16 @@ async function gSyncItem(){
     else{ item.managerSync='error'; statusEl.innerHTML='<div class="st se">❌ Manager sync failed: '+esc(d.error||'Unknown error')+'</div>'; }
   }catch(e){ item.managerSync='error'; statusEl.innerHTML='<div class="st se">❌ Network error: '+esc(e.message)+'</div>'; }
 
-  if(item.managerSync==='ok'&&CFG.tin&&CFG.deviceNo){
+  if(item.managerSync==='ok' && TG.gRegEfris && CFG.tin && CFG.deviceNo){
     statusEl.innerHTML+='<div class="st si"><span class="sp">⏳</span> Registering in EFRIS goods registry…</div>';
     try{
       const r2=await fetch(RELAY+'/api/efris/register-goods',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tin:CFG.tin,deviceNo:CFG.deviceNo,efrisPassword:CFG.efrisPassword,mode:CFG.sandbox?'sandbox':'production',item})});
       const d2=await r2.json();
       if(d2.success){ item.efrisSync='ok'; statusEl.innerHTML+='<div class="st ss">✅ Registered in EFRIS goods registry!</div>'; }
-      else{ item.efrisSync='error'; statusEl.innerHTML+='<div class="al aw">⚠ EFRIS: '+esc(d2.error||d2.returnMessage||'Failed')+'</div>'; }
-    }catch(e2){ item.efrisSync='error'; }
+      else{ item.efrisSync='error'; statusEl.innerHTML+='<div class="al aw">⚠ EFRIS registration: '+esc(d2.error||d2.returnMessage||'Failed')+'<br><small>The item was saved in Manager.io. You can retry EFRIS registration later from the My Items tab.</small></div>'; }
+    }catch(e2){ item.efrisSync='error'; statusEl.innerHTML+='<div class="al aw">⚠ Could not reach EFRIS. Item saved in Manager.io — retry EFRIS later.</div>'; }
+  } else if(item.managerSync==='ok' && TG.gRegEfris && (!CFG.tin||!CFG.deviceNo)){
+    statusEl.innerHTML+='<div class="al aw">ℹ️ EFRIS registration skipped — add TIN and Device No. in Settings first.</div>';
   }
   gItems.push(item); gRefreshList();
 }
