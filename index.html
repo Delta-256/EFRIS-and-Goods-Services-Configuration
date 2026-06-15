@@ -952,20 +952,40 @@ async function gLoadManagerItems(){
   finally{btn.disabled=false;btn.textContent='🔄 Reload Manager Items';}
 }
 
-function gImportManagerItem(idx){
+async function gImportManagerItem(idx){
   const i=_mgrItems[idx];
   if(!i)return;
+  const listEl=$('gManagerItemsList');
+  listEl.innerHTML='<div class="al ai"><span class="sp">⏳</span> Loading full item details from Manager.io…</div>';
+  // Fetch full item details (price, code, description, custom fields)
+  let detail=null;
+  try{
+    const ep=encodeURIComponent(CFG.managerEndpoint||'');
+    const tk=encodeURIComponent(CFG.accessToken||'');
+    const r=await fetch(RELAY+'/api/goods/manager-item-detail?ep='+ep+'&tk='+tk+'&key='+encodeURIComponent(i.key)+'&type='+encodeURIComponent(i.type));
+    const d=await r.json();
+    if(d.success) detail=d.item;
+  }catch(e){}
   gSwSub('cfg');
   gGoStep(1);
   setTimeout(()=>{
-    sv('gFldCode', i.code||'');
-    sv('gFldName', i.name||'');
-    sv('gFldUom',  i.unitName||'');
+    const code=(detail&&detail.code)||i.code||'';
+    const name=(detail&&detail.name)||i.name||'';
+    const unitName=(detail&&detail.unitName)||i.unitName||'';
+    const price=(detail&&detail.hasSalesUnitPrice)?detail.salesUnitPrice:0;
+    const remarks=(detail&&(detail.defaultLineDescription||detail.description))||'';
+    sv('gFldCode', code);
+    sv('gFldName', name);
+    sv('gFldUom',  unitName);
+    if(price>0) sv('gFldPrice', String(price));
+    if(remarks){ const rEl=$('gFldRemarks'); if(rEl) rEl.value=remarks; }
     const typeEl=$('gFldType');
     if(typeEl) typeEl.value=i.type==='Goods'?'Goods':'Service';
     window._importedManagerKey=i.key;
   },50);
-  $('gManagerItemsList').innerHTML='<div class="al as">✅ Importing <strong>'+esc(i.code)+'</strong> — now complete the commodity wizard steps 1–4, then fill in Step 5 details and click Sync.</div>';
+  const priceNote=detail&&detail.hasSalesUnitPrice?' · Price: '+(detail.salesUnitPrice||0).toLocaleString():'';
+  const remarkNote=detail&&(detail.defaultLineDescription||detail.description)?' · Remarks pre-filled':'';
+  listEl.innerHTML='<div class="al as">✅ Importing <strong>'+esc(i.code||i.name)+'</strong>'+priceNote+remarkNote+'<br>Complete the commodity wizard steps 1–4, then review Step 5 and click Sync.</div>';
 }
 
 // ── Init ──────────────────────────────────────────────────────

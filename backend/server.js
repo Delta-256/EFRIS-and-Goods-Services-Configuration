@@ -478,28 +478,41 @@ app.post('/api/goods/sync-to-manager', async (req, res) => {
     if (catPathFieldKey && catPath)      cfStrings[catPathFieldKey] = catPath;
     if (Object.keys(cfStrings).length)   payload.CustomFields2 = { Strings: cfStrings };
 
-    // Strategy: POST first. Manager always returns the item list after POST
-    // (whether created or already existed). Find our item in that list by
-    // name/code, then PUT to ensure the payload is applied correctly.
-    console.log(`\n🔗 Syncing to Manager.io: POST ${ep}${listPath} — ${item.code} ${item.name}`);
-    let r = await managerCall(ep, accessToken, 'POST', listPath, payload);
-    let action = 'created';
-    let existingKey = null;
+    // Strategy: GET list first, find existing item by code then name, then PUT or POST.
+    // This is reliable: we know exactly whether we are creating or updating before writing.
+    console.log(`\n🔗 Syncing to Manager.io: ${ep}${listPath} — ${item.code} ${item.name}`);
+    const listR = await managerCall(ep, accessToken, 'GET', listPath, null);
+    const existingList = (listR.status === 200 && listR.data && listR.data[listKey]) || [];
 
-    if (r.status === 200 && r.data && Array.isArray(r.data[listKey])) {
-      // Find the item in the returned list by name or code
-      const match = r.data[listKey].find(i => {
-        const nm = (i.itemName || i.name || i.Name || '').toLowerCase();
-        const cd = (i.code || i.Code || '').toLowerCase();
-        return nm === item.name.toLowerCase() || (item.code && cd === item.code.toLowerCase());
-      });
-      if (match) {
-        existingKey = match.key || match.Key;
-        console.log(`   Found key ${existingKey} — applying PUT to set all fields`);
-        r = await managerCall(ep, accessToken, 'PUT', `${listPath}/${existingKey}`, payload);
-        // If we got the list back on POST and there was already 1+ item, it was an update
-        action = r.data && r.data[listKey] && r.data[listKey].length > 0 &&
-                 r.data[listKey].some(i => (i.key||i.Key) === existingKey) ? 'updated' : 'created';
+    // Match by code first (exact, case-insensitive), then by name as fallback
+    const codeLower = (item.code || '').toLowerCase();
+    const nameLower = (item.name || '').toLowerCase();
+    const match = existingList.find(i => {
+      const cd = (i.code || i.Code || '').toLowerCase();
+      return codeLower && cd && cd === codeLower;
+    }) || existingList.find(i => {
+      const nm = (i.itemName || i.name || i.Name || '').toLowerCase();
+      return nm === nameLower;
+    });
+
+    let r, action, existingKey = null;
+    if (match) {
+      existingKey = match.key || match.Key;
+      console.log(`   Existing item found (key ${existingKey}) — applying PUT`);
+      r = await managerCall(ep, accessToken, 'PUT', `${listPath}/${existingKey}`, payload);
+      action = 'updated';
+    } else {
+      console.log(`   No existing item found — creating via POST`);
+      r = await managerCall(ep, accessToken, 'POST', listPath, payload);
+      action = 'created';
+      // POST returns the full list; try to find the newly created item's key by code
+      if (r.status === 200 && r.data && r.data[listKey]) {
+        const created = r.data[listKey].find(i => {
+          const cd = (i.code || i.Code || '').toLowerCase();
+          const nm = (i.itemName || i.name || i.Name || '').toLowerCase();
+          return (codeLower && cd === codeLower) || nm === nameLower;
+        });
+        if (created) existingKey = created.key || created.Key;
       }
     }
 
@@ -508,11 +521,11 @@ app.post('/api/goods/sync-to-manager', async (req, res) => {
     if (catPathFieldKey) console.log(`   EFRIS Category Path  → ${catPath}`);
 
     const ok = r.status >= 200 && r.status < 300;
-    const managerId = ok ? (existingKey || (r.data && (r.data.Key || r.data.key || r.data.id)) || null) : null;
+    const managerId = ok ? (existingKey || null) : null;
     const fieldsWritten = Object.keys(cfStrings).length;
     res.json(ok
       ? { success: true, action, managerId, comCodeWritten: !!(comCodeFieldKey && item.comCode), fieldsWritten }
-      : { success: false, error: `Manager returned HTTP ${r.status}` });
+      : { success: false, error: `Manager returned HTTP ${r.status}: ${JSON.stringify(r.data||'').slice(0,200)}` });
   } catch(e) {
     res.status(500).json({ success: false, error: e.message });
   }
@@ -530,13 +543,47 @@ app.get('/api/goods/manager-items', async (req, res) => {
     const services = (niR.status === 200 && niR.data && niR.data.nonInventoryItems) || [];
     const goods    = (invR.status === 200 && invR.data && invR.data.inventoryItems) || [];
     const normalize = (arr, type) => arr.map(i => ({
-      key:      i.key || i.Key,
-      code:     i.code || i.Code || '',
-      name:     i.itemName || i.name || i.Name || '',
-      unitName: i.unitName || i.UnitName || '',
+      key:            i.key || i.Key,
+      code:           i.code || i.Code || '',
+      name:           i.itemName || i.name || i.Name || '',
+      unitName:       i.unitName || i.UnitName || '',
+      salesUnitPrice: i.salesUnitPrice || i.SalesUnitPrice || 0,
+      description:    i.description || i.Description || '',
       type
     }));
     res.json({ success: true, items: [...normalize(services,'Service'), ...normalize(goods,'Goods')] });
+  } catch(e) {
+    res.json({ success: false, error: e.message });
+  }
+});
+
+// Full details for a single Manager.io item (for import prefill)
+app.get('/api/goods/manager-item-detail', async (req, res) => {
+  const ep = normEp(req.query.ep || '');
+  const tk = req.query.tk || '';
+  const key = req.query.key || '';
+  const type = req.query.type || 'Service';
+  if (!ep || !tk || !key) return res.status(400).json({ success: false, error: 'ep, tk and key are required' });
+  const itemPath = type === 'Goods' ? `/inventory-items/${key}` : `/non-inventory-items/${key}`;
+  try {
+    const r = await managerCall(ep, tk, 'GET', itemPath, null);
+    if (r.status !== 200) return res.json({ success: false, error: `Manager returned HTTP ${r.status}` });
+    const d = r.data || {};
+    // Manager returns camelCase on GET; normalize both cases
+    const cf2 = d.customFields2 || d.CustomFields2 || {};
+    const cfStrings = cf2.strings || cf2.Strings || {};
+    console.log(`   Detail for ${key}:`, JSON.stringify(d).slice(0, 300));
+    res.json({ success: true, item: {
+      key,
+      code:                   d.code || d.Code || '',
+      name:                   d.name || d.Name || d.itemName || '',
+      unitName:               d.unitName || d.UnitName || '',
+      salesUnitPrice:         d.salesUnitPrice || d.SalesUnitPrice || 0,
+      hasSalesUnitPrice:      !!(d.hasSalesUnitPrice || d.HasSalesUnitPrice),
+      description:            d.description || d.Description || '',
+      defaultLineDescription: d.defaultLineDescription || d.DefaultLineDescription || '',
+      customFieldStrings:     cfStrings,
+    }});
   } catch(e) {
     res.json({ success: false, error: e.message });
   }
