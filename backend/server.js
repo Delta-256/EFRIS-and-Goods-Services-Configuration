@@ -410,6 +410,35 @@ app.get('/api/commodity/:code', (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+app.get('/api/commodity/search', (req, res) => {
+  try {
+    const q = (req.query.q || '').toLowerCase().trim();
+    if (q.length < 2) return res.json([]);
+    const tree = getTree();
+    const results = [];
+    for (const [sc, seg] of Object.entries(tree)) {
+      for (const [fc, fam] of Object.entries(seg.f)) {
+        for (const [cc, cls] of Object.entries(fam.c)) {
+          if (!cls.d) continue;
+          for (const [dc, com] of Object.entries(cls.d)) {
+            const comName = typeof com === 'string' ? com : com.n;
+            if (comName.toLowerCase().includes(q) || dc.includes(q)) {
+              results.push({ commodityCode: dc, commodityName: comName,
+                classCode: cc, className: cls.n, familyCode: fc, familyName: fam.n,
+                segmentCode: sc, segmentName: seg.n });
+              if (results.length >= 20) break;
+            }
+          }
+          if (results.length >= 20) break;
+        }
+        if (results.length >= 20) break;
+      }
+      if (results.length >= 20) break;
+    }
+    res.json(results);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 // ══════════════════════════════════════════════════════════════
 //  GOODS SYNC ROUTES (new)
 // ══════════════════════════════════════════════════════════════
@@ -437,11 +466,12 @@ app.post('/api/goods/sync-to-manager', async (req, res) => {
     const catPath = [item.segment, item.family, item.cls].filter(Boolean).join(' >> ');
 
     const payload = {
-      Code:           item.code,
-      Name:           item.name,
-      SalesUnitPrice: parseFloat(item.price) || 0,
-      UnitName:       item.uom,
-      Description:    item.remarks || ''
+      Code:              item.code,
+      Name:              item.name,
+      UnitName:          item.uom,
+      Description:       item.remarks || '',
+      HasSalesUnitPrice: parseFloat(item.price) > 0,
+      SalesUnitPrice:    parseFloat(item.price) || 0,
     };
     const cfStrings = {};
     if (comCodeFieldKey && item.comCode) cfStrings[comCodeFieldKey] = item.comCode;
