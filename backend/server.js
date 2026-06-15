@@ -422,12 +422,23 @@ app.post('/api/goods/sync-to-manager', async (req, res) => {
   const ep = normEp(managerEndpoint);
   const isService = (item.type || 'Service') !== 'Goods';
   const docPath = isService ? '/non-inventory-items' : '/inventory-items';
-  const payload = { Code: item.code, Name: item.name, UnitPrice: item.price, UnitName: item.uom };
+  // Manager.io API v2 uses SalesUnitPrice (not UnitPrice) and Name (not ItemName).
+  const payload = {
+    Code:           item.code,
+    Name:           item.name,
+    SalesUnitPrice: parseFloat(item.price) || 0,
+    UnitName:       item.uom,
+    Description:    item.remarks || ''
+  };
+  console.log(`\n🔗 Syncing to Manager.io: POST ${ep}${docPath} — ${item.code} ${item.name}`);
   try {
     const r = await managerCall(ep, accessToken, 'POST', docPath, payload);
+    console.log(`   Manager response: HTTP ${r.status}`, JSON.stringify(r.data || '').slice(0, 200));
     const ok = r.status >= 200 && r.status < 300;
     const managerId = ok && r.data ? (r.data.Key || r.data.key || r.data.id || null) : null;
-    res.json(ok ? { success: true, managerId } : { success: false, error: 'Manager returned HTTP ' + r.status });
+    res.json(ok
+      ? { success: true, managerId }
+      : { success: false, error: `Manager returned HTTP ${r.status} — check access token and that the business is open` });
   } catch(e) {
     res.status(500).json({ success: false, error: e.message });
   }
@@ -459,10 +470,10 @@ app.post('/api/efris/register-goods', async (req, res) => {
     const taxRate = vatCat === '01' ? '0.18' : '0.00';
 
     // T127 = UploadGoods (goods registration). Field names are URA-specific.
+    // goodsTypeCode is NOT sent — URA derives type from goodsCategoryId.
     const t127Payload = {
       goodsCode:         item.code,
       goodsName:         item.name,
-      goodsTypeCode:     item.type === 'Goods' ? '1' : '2',  // 1=goods, 2=service
       measureUnit:       uomCode,
       currency:          item.cur || 'UGX',
       unitPrice:         String(parseFloat(item.price) || 0),
