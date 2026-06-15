@@ -424,16 +424,27 @@ app.post('/api/goods/sync-to-manager', async (req, res) => {
   const listPath = isService ? '/non-inventory-items' : '/inventory-items';
   const listKey  = isService ? 'nonInventoryItems' : 'inventoryItems';
 
-  const payload = {
-    Code:           item.code,
-    Name:           item.name,
-    SalesUnitPrice: parseFloat(item.price) || 0,
-    UnitName:       item.uom,
-    Description:    item.remarks || ''
-  };
-
   try {
-    // 1. Fetch existing items to check for duplicate by Code
+    // 1. Look up the "EFRIS Commodity Code" custom field GUID (so we can write it)
+    let comCodeFieldKey = null;
+    try {
+      const cf = await mgrTextCustomFields(ep, accessToken);
+      comCodeFieldKey = cf.byName['EFRIS Commodity Code'] || null;
+    } catch(_) {}
+
+    // 2. Build payload — include custom field if the GUID was found
+    const payload = {
+      Code:           item.code,
+      Name:           item.name,
+      SalesUnitPrice: parseFloat(item.price) || 0,
+      UnitName:       item.uom,
+      Description:    item.remarks || ''
+    };
+    if (comCodeFieldKey && item.comCode) {
+      payload.CustomFields2 = { Strings: { [comCodeFieldKey]: item.comCode } };
+    }
+
+    // 3. Check for existing item by Code to decide create vs update
     let existingKey = null;
     try {
       const listR = await managerCall(ep, accessToken, 'GET', listPath, null);
@@ -447,23 +458,21 @@ app.post('/api/goods/sync-to-manager', async (req, res) => {
 
     let r, action;
     if (existingKey) {
-      // 2a. Item exists — PUT to update
       console.log(`\n🔗 Updating in Manager.io: PUT ${ep}${listPath}/${existingKey} — ${item.code} ${item.name}`);
       r = await managerCall(ep, accessToken, 'PUT', `${listPath}/${existingKey}`, payload);
       action = 'updated';
     } else {
-      // 2b. New item — POST to create
       console.log(`\n🔗 Creating in Manager.io: POST ${ep}${listPath} — ${item.code} ${item.name}`);
       r = await managerCall(ep, accessToken, 'POST', listPath, payload);
       action = 'created';
     }
     console.log(`   Manager response: HTTP ${r.status}`, JSON.stringify(r.data || '').slice(0, 200));
+    if (comCodeFieldKey) console.log(`   EFRIS Commodity Code field key: ${comCodeFieldKey} → ${item.comCode}`);
 
-    // Manager returns 200 for both create and update; a 4xx means a real error
     const ok = r.status >= 200 && r.status < 300;
     const managerId = ok ? (existingKey || (r.data && (r.data.Key || r.data.key || r.data.id)) || null) : null;
     res.json(ok
-      ? { success: true, action, managerId }
+      ? { success: true, action, managerId, comCodeWritten: !!(comCodeFieldKey && item.comCode) }
       : { success: false, error: `Manager returned HTTP ${r.status}` });
   } catch(e) {
     res.status(500).json({ success: false, error: e.message });

@@ -843,7 +843,7 @@ async function gSyncItem(){
   try{
     const r=await fetch(RELAY+'/api/goods/sync-to-manager',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({managerEndpoint:ep,accessToken:tk,item})});
     const d=await r.json();
-    if(d.success){ item.managerSync='ok'; item.managerId=d.managerId||null; const actionLabel=d.action==='updated'?'✏️ Updated in Manager.io':'✅ Created in Manager.io'; statusEl.innerHTML='<div class="st ss">'+actionLabel+'</div>'; }
+    if(d.success){ item.managerSync='ok'; item.managerId=d.managerId||null; const actionLabel=d.action==='updated'?'✏️ Updated in Manager.io':'✅ Created in Manager.io'; const comNote=d.comCodeWritten?' + EFRIS Commodity Code saved':''; statusEl.innerHTML='<div class="st ss">'+actionLabel+comNote+'</div>'; }
     else{ item.managerSync='error'; statusEl.innerHTML='<div class="st se">❌ Manager sync failed: '+esc(d.error||'Unknown error')+'</div>'; }
   }catch(e){ item.managerSync='error'; statusEl.innerHTML='<div class="st se">❌ Network error: '+esc(e.message)+'</div>'; }
 
