@@ -2,6 +2,7 @@
 const http   = require('http');
 const https  = require('https');
 const crypto = require('crypto');
+const zlib   = require('zlib');
 const { URL } = require('url');
 const express = require('express');
 const cors    = require('cors');
@@ -126,6 +127,29 @@ async function mgrTextCustomFields(ep, tk) {
   return { byName, byKey };
 }
 
+// Cache tax code list per endpoint to avoid repeated fetches
+const _taxCodeCache = {};
+async function mgrTaxCodeGuid(ep, tk, vatType) {
+  const cacheKey = ep + '_taxcodes';
+  if (!_taxCodeCache[cacheKey]) {
+    try {
+      const r = await managerCall(ep, tk, 'GET', '/tax-codes');
+      _taxCodeCache[cacheKey] = (r.data && r.data.taxCodes) || [];
+    } catch(e) { _taxCodeCache[cacheKey] = []; }
+  }
+  const codes = _taxCodeCache[cacheKey];
+  // Match by VAT type: Standard=18%, Zero=0%, Exempt
+  const query = vatType === 'Exempt' ? 'exempt'
+    : vatType === 'Zero' ? ['zero', '0%', 'zero rated', 'zero-rated']
+    : ['18%', 'standard', 'vat']; // Standard
+  const q = Array.isArray(query) ? query : [query];
+  const match = codes.find(c => {
+    const nm = (c.name || c.Name || '').toLowerCase();
+    return q.some(term => nm.includes(term));
+  });
+  return match ? (match.key || match.Key) : null;
+}
+
 async function normalizeInvoice(ep, tk, key) {
   const formR = await managerCall(ep, tk, 'GET', '/sales-invoice-form/' + key);
   if (formR.status !== 200) return { _error: 'Manager returned HTTP ' + formR.status, _status: formR.status };
@@ -219,6 +243,16 @@ function aesDecryptStr(b64, keyBytes) {
   const d = crypto.createDecipheriv(aesAlgo(keyBytes), keyBytes, null);
   return d.update(b64, 'base64', 'utf8') + d.final('utf8');
 }
+// AES-decrypt to raw bytes, then gunzip if the payload is gzip-compressed
+// (large EFRIS responses like the T115 dictionary are returned gzipped).
+function aesDecryptMaybeGzip(b64, keyBytes) {
+  const d = crypto.createDecipheriv(aesAlgo(keyBytes), keyBytes, null);
+  const buf = Buffer.concat([d.update(Buffer.from(b64, 'base64')), d.final()]);
+  if (buf.length >= 2 && buf[0] === 0x1f && buf[1] === 0x8b) {
+    return zlib.gunzipSync(buf).toString('utf8');
+  }
+  return buf.toString('utf8');
+}
 function signSha1(content, privatePem) {
   return crypto.createSign('RSA-SHA1').update(content, 'utf8').sign(privatePem, 'base64');
 }
@@ -280,7 +314,72 @@ async function getSession(tin, deviceNo, password, efrisBaseUrl) {
   return session;
 }
 
-// ── Build T109 ────────────────────────────────────────────────
+// ── EFRIS data dictionary (T115) — used to resolve currency codes ──
+// T130's `currency` field wants the EFRIS internal currency code, NOT the ISO
+// string ("UGX" is rejected with rc:680). We fetch the dictionary once, cache it
+// on the session, and map ISO → EFRIS code.
+const _dictCache = {};
+async function getEfrisDictionary(tin, deviceNo, session, eu) {
+  const key = tin + '_' + deviceNo;
+  if (_dictCache[key]) return _dictCache[key];
+  try {
+    const t115 = await efrisCall(eu, efrisEnvEnc('T115', {}, tin, deviceNo, session.aesKey, session.privatePem));
+    const rc = t115.data && t115.data.returnStateInfo ? t115.data.returnStateInfo.returnCode : null;
+    const rm = t115.data && t115.data.returnStateInfo ? t115.data.returnStateInfo.returnMessage : '';
+    console.log(`   T115 outer rc: ${rc} — ${rm}`);
+    if (t115.data && t115.data.data && t115.data.data.content) {
+      let raw = null;
+      // Successful responses are AES-encrypted (and often gzip-compressed);
+      // error envelopes are plain base64.
+      try { raw = aesDecryptMaybeGzip(t115.data.data.content, session.aesKey); }
+      catch(_) { try { raw = Buffer.from(t115.data.data.content, 'base64').toString('utf8'); } catch(__) {} }
+      if (raw) {
+        console.log(`   T115 raw content (first 300): ${raw.slice(0, 300)}`);
+        try {
+          const dict = JSON.parse(raw);
+          console.log(`   T115 dictionary loaded — top-level keys: ${Object.keys(dict).join(', ')}`);
+          _dictCache[key] = dict;
+          return dict;
+        } catch(e) { console.log(`   (T115 content not JSON: ${e.message})`); }
+      }
+    }
+  } catch(e) { console.log(`   (T115 dictionary fetch failed: ${e.message})`); }
+  return null;
+}
+
+// Resolve an ISO currency (e.g. "UGX") to the EFRIS currency code expected by T130.
+async function resolveEfrisCurrency(isoCode, tin, deviceNo, session, eu) {
+  const iso = (isoCode || 'UGX').trim().toUpperCase();
+  const dict = await getEfrisDictionary(tin, deviceNo, session, eu);
+  if (!dict) return iso; // fallback to ISO if dictionary unavailable
+  // Log currency-like sections so the exact format is visible in server logs.
+  for (const [section, val] of Object.entries(dict)) {
+    if (Array.isArray(val) && /rate|curr/i.test(section)) {
+      console.log(`   T115 section "${section}" sample: ${JSON.stringify(val.slice(0, 2))}`);
+    }
+  }
+  // Search every array for an entry matching this ISO code (exact value match first,
+  // then substring within any field), and return its internal code.
+  const pickCode = row => row.currencyCode || row.code || row.value || row.id || row.key;
+  let exact = null, partial = null;
+  for (const [section, val] of Object.entries(dict)) {
+    if (!Array.isArray(val)) continue;
+    for (const row of val) {
+      if (!row || typeof row !== 'object') continue;
+      const vals = Object.values(row).map(x => String(x).toUpperCase());
+      if (vals.includes(iso)) { exact = exact || { section, code: pickCode(row), row }; }
+      else if (!partial && vals.some(v => v.includes(iso))) { partial = { section, code: pickCode(row), row }; }
+    }
+  }
+  const hit = exact || partial;
+  if (hit) {
+    console.log(`   Currency "${iso}" → EFRIS code "${hit.code}" (section: ${hit.section}, ${exact?'exact':'partial'} match)`);
+    return String(hit.code);
+  }
+  console.log(`   Currency "${iso}" not found in T115 dictionary — sending ISO as-is`);
+  return iso;
+}
+
 function buildT109(invoice, cfg) {
   const vat = !!cfg.vatRegistered;
   const r2 = n => (Math.round((parseFloat(n) || 0) * 100) / 100).toFixed(2);
@@ -489,14 +588,34 @@ app.post('/api/goods/sync-to-manager', async (req, res) => {
       if (formR.status !== 200) {
         return res.json({ success: false, error: `Could not fetch item form: HTTP ${formR.status}` });
       }
-      // Merge our fields into the form (preserving all other Manager fields)
+      // Merge our fields into the form (preserving all other Manager fields).
+      // Non-inventory and inventory items use different field names in Manager API.
       const form = Object.assign({}, formR.data || {});
-      form.Code              = item.code;
-      form.Name              = item.name;
-      form.UnitName          = item.uom;
-      form.HasSalesUnitPrice = parseFloat(item.price) > 0;
-      form.SalesUnitPrice    = parseFloat(item.price) || 0;
+      console.log(`   Form fields available: ${Object.keys(form).join(', ')}`);
+      const price = parseFloat(item.price) || 0;
+      form.Code     = item.code;
+      form.UnitName = item.uom;
       if (item.remarks) form.DefaultLineDescription = item.remarks;
+      if (isService) {
+        // Non-inventory items
+        form.Name              = item.name;
+        form.HasSalesUnitPrice = price > 0;
+        form.SalesUnitPrice    = price;
+      } else {
+        // Inventory items — confirmed field names from GET form response
+        form.ItemName                 = item.name;
+        form.DefaultSalesUnitPrice    = price;
+        form.HasDefaultSalesUnitPrice = price > 0;
+        // Note: inventory items have no Code field in the form API
+      }
+      // Tax code — look up Manager tax code GUID matching the VAT designation
+      if (item.vat) {
+        try {
+          const taxGuid = await mgrTaxCodeGuid(ep, accessToken, item.vat);
+          if (taxGuid) { form.TaxCode = taxGuid; console.log(`   Tax code GUID → ${taxGuid} (${item.vat})`); }
+          else { console.log(`   ⚠ No matching tax code found for VAT type: ${item.vat}`); }
+        } catch(_) {}
+      }
       // Merge custom fields — preserve existing, add/overwrite ours
       const cfStrings = Object.assign({}, (form.CustomFields2 && form.CustomFields2.Strings) || {});
       if (comCodeFieldKey && item.comCode) cfStrings[comCodeFieldKey] = item.comCode;
@@ -519,14 +638,20 @@ app.post('/api/goods/sync-to-manager', async (req, res) => {
       const cfStrings = {};
       if (comCodeFieldKey && item.comCode) cfStrings[comCodeFieldKey] = item.comCode;
       if (catPathFieldKey && catPath)      cfStrings[catPathFieldKey] = catPath;
-      const payload = {
-        Code:              item.code,
-        Name:              item.name,
-        UnitName:          item.uom,
-        DefaultLineDescription: item.remarks || '',
-        HasSalesUnitPrice: parseFloat(item.price) > 0,
-        SalesUnitPrice:    parseFloat(item.price) || 0,
-      };
+      const price = parseFloat(item.price) || 0;
+      const payload = { Code: item.code, Name: item.name, UnitName: item.uom, DefaultLineDescription: item.remarks || '' };
+      if (isService) {
+        payload.HasSalesUnitPrice = price > 0;
+        payload.SalesUnitPrice    = price;
+      } else {
+        payload.ItemName                 = item.name;
+        payload.DefaultSalesUnitPrice    = price;
+        payload.HasDefaultSalesUnitPrice = price > 0;
+      }
+      // Tax code for create
+      if (item.vat) {
+        try { const tg = await mgrTaxCodeGuid(ep, accessToken, item.vat); if (tg) payload.TaxCode = tg; } catch(_) {}
+      }
       if (Object.keys(cfStrings).length) payload.CustomFields2 = { Strings: cfStrings };
       r = await managerCall(ep, accessToken, 'POST', listPath, payload);
       action = 'created';
@@ -621,14 +746,30 @@ app.post('/api/efris/register-goods', async (req, res) => {
     const session = await getSession(tin, deviceNo, efrisPassword, eu);
     if (!session.aesKey) throw new Error('No AES key available — check private key path');
 
-    // Resolve UOM text → URA code (e.g. "Per Person" → "PP").
-    // Fall back to the raw text if not found (URA rejects unknown codes, but at least the error is clear).
-    let uomCode = item.uom || 'UN';
-    try {
-      const units = getUnits();
-      const match = units.find(u => u.name.toLowerCase() === (item.uom || '').toLowerCase());
-      if (match) uomCode = match.code;
-    } catch(_) {}
+    // Use pre-resolved efrisUom if provided (set in frontend from auto-detection)
+    // Otherwise fall back to name lookup against uom.json
+    let uomCode = 'UN';
+    // Only use efrisUom if it looks like a code (no spaces, ≤5 chars)
+    const rawEfrisUom = (item.efrisUom || '').trim();
+    const efrisUomIsCode = rawEfrisUom && !rawEfrisUom.includes(' ') && rawEfrisUom.length <= 5;
+    if (efrisUomIsCode) {
+      uomCode = rawEfrisUom.toUpperCase();
+      console.log(`   UOM: "${item.uom}" → EFRIS code "${uomCode}" (from item)`);
+    } else {
+      try {
+        const units = getUnits();
+        const match = units.find(u => u.name.toLowerCase() === (item.uom || '').toLowerCase());
+        if (match) {
+          uomCode = match.code;
+        } else if (item.uom && item.uom.length <= 3) {
+          uomCode = item.uom;
+          console.log(`   ℹ UOM "${item.uom}" treated as custom EFRIS code`);
+        } else {
+          uomCode = 'UN';
+          console.log(`   ⚠ UOM "${item.uom}" exceeds 3-byte EFRIS limit — using UN`);
+        }
+      } catch(_) {}
+    }
 
     // VAT tax item — taxCategoryCode: '01'=standard(18%), '02'=zero-rated, '03'=exempt
     const vatCat = item.vat === 'Exempt' ? '03' : item.vat === 'Zero' ? '02' : '01';
@@ -641,38 +782,63 @@ app.post('/api/efris/register-goods', async (req, res) => {
     // currency: EFRIS accepts ISO codes (USD, EUR, GBP…) for foreign-currency items.
     // UGX is the default base currency — omit the field entirely when pricing in UGX.
     // taxItems are for invoices (T109), not goods registration — exclude here.
-    const isForeignCurrency = item.cur && item.cur !== 'UGX';
+    // currency is required by T130, but it wants the EFRIS dictionary code (not "UGX").
+    // Resolve via the T115 data dictionary.
+    const t130Currency = await resolveEfrisCurrency(item.cur || 'UGX', tin, deviceNo, session, eu);
     const t130Payload = {
       goodsCode:          item.code,
       goodsName:          item.name,
       goodsTypeCode,
       measureUnit:        uomCode,
-      unitPrice:          String(parseFloat(item.price) || 0),
-      goodsCategoryId:    item.comCode || '',
-      goodsCategoryName:  item.comName || '',
-      haveExciseTax:      item.excise === 'Yes' ? '101' : '102',
-      description:        item.remarks || '',
-      stockPrewarning:    '0',
-      pricingMode:        '1',
-      havePieceUnit:      '102',
-      pieceUnit:          '',
-      packageScaledValue: '1',
-      scaledValue:        '1',
-      discountTaxRate:    '',
+      unitPrice:             String(parseFloat(item.price) || 0),
+      currency:              t130Currency,
+      commodityCategoryId:   item.comCode || '',
+      commodityCategoryName: item.comName || '',
+      haveExciseTax:         item.excise === 'Yes' ? '101' : '102',
+      description:           item.remarks || '',
+      stockPrewarning:       '0',
+      pricingMode:           '1',
+      havePieceUnit:         '102',
+      pieceUnit:             '',
+      packageScaledValue:    '1',
+      scaledValue:           '1',
+      discountTaxRate:       '',
     };
-    if (isForeignCurrency) t130Payload.currency = item.cur;
 
     console.log(`\n📦 Registering goods with EFRIS T130: ${item.code} — ${item.name}`);
-    console.log(`   Payload: goodsCode=${t130Payload.goodsCode}, categoryId=${t130Payload.goodsCategoryId}, measureUnit=${uomCode}, price=${t130Payload.unitPrice}, currency=${t130Payload.currency||'UGX(default)'}, vatCat=${vatCat}, type=${goodsTypeCode}`);
-    const t130 = await efrisCall(eu, efrisEnvEnc('T130', t130Payload, tin, deviceNo, session.aesKey, session.privatePem));
-    const rc = t130.data && t130.data.returnStateInfo ? t130.data.returnStateInfo.returnCode : null;
-    const rm = t130.data && t130.data.returnStateInfo ? t130.data.returnStateInfo.returnMessage : '';
-    // Log full response body to help diagnose partial failures
-    console.log(`   T130 rc: ${rc} (${rm})`);
-    if (rc !== '00') console.log(`   T130 full response:`, JSON.stringify(t130.data || '').slice(0, 500));
-    const ok = rc === '00';
-    res.json({ success: ok, returnCode: rc, returnMessage: rm,
-      error: ok ? undefined : `EFRIS T130: ${rc} — ${rm}` });
+    console.log(`   Payload: goodsCode=${t130Payload.goodsCode}, categoryId=${t130Payload.commodityCategoryId}, measureUnit=${uomCode}, price=${t130Payload.unitPrice}, currency=${t130Currency}, vatCat=${vatCat}, type=${goodsTypeCode}`);
+
+    // T130 is a BATCH interface — payload must be an array even for a single item
+    const t130 = await efrisCall(eu, efrisEnvEnc('T130', [t130Payload], tin, deviceNo, session.aesKey, session.privatePem));
+    const outerRc = t130.data && t130.data.returnStateInfo ? t130.data.returnStateInfo.returnCode : null;
+    const outerRm = t130.data && t130.data.returnStateInfo ? t130.data.returnStateInfo.returnMessage : '';
+    console.log(`   T130 outer rc: ${outerRc} (${outerRm})`);
+
+    // Decrypt per-item results from response content
+    let itemRc = outerRc, itemRm = outerRm;
+    if (t130.data && t130.data.data && t130.data.data.content) {
+      try {
+        const raw = aesDecryptStr(t130.data.data.content, session.aesKey);
+        const results = JSON.parse(raw);
+        const r0 = Array.isArray(results) ? results[0] : results;
+        if (r0) {
+          itemRc = r0.returnCode || r0.returnStateInfo?.returnCode || outerRc;
+          itemRm = r0.returnMessage || r0.returnStateInfo?.returnMessage || outerRm;
+          console.log(`   T130 item rc: ${itemRc} — ${itemRm}`);
+        }
+      } catch(e) { console.log(`   (could not decrypt T130 item response: ${e.message})`); }
+    }
+
+    // rc:00 = success; rc:602 = already exists (treat as success — item is registered)
+    const ok = itemRc === '00' || itemRc === '602';
+    const alreadyExists = itemRc === '602';
+    if (ok) {
+      console.log(alreadyExists ? `   ✓ Item already registered in EFRIS` : `   ✅ Registered successfully`);
+    } else {
+      console.log(`   ❌ T130 failed: ${itemRc} — ${itemRm}`);
+    }
+    res.json({ success: ok, returnCode: itemRc, returnMessage: itemRm, alreadyExists,
+      error: ok ? undefined : `EFRIS T130: ${itemRc} — ${itemRm}` });
   } catch(e) {
     console.log(`   ❌ register-goods error: ${e.message}`);
     res.status(500).json({ success: false, error: e.message });
