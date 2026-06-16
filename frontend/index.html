@@ -246,7 +246,7 @@
         <div class="g-step" id="gws5"><span class="g-step-n">5</span>Details</div>
       </div>
       <div class="card">
-        <div id="gstep1" class="efris-only">
+        <div id="gstep1">
           <div class="ct">Step 1 &mdash; Industry Segment</div>
           <div class="al ai">&#128161; Type at least 3 characters to search &mdash; e.g. <strong>"Tra"</strong> for Travel, <strong>"Hea"</strong> for Healthcare, <strong>"Fin"</strong> for Financial Services</div>
           <div class="fg"><label>Search segments</label><input type="text" id="gSegInp" placeholder="Search industry segments..." oninput="gOnSegInput(this.value)" autocomplete="off"/></div>
@@ -254,21 +254,21 @@
           <div id="gSegSel" class="g-sel-badge" style="display:none"></div>
           <div class="row mt"><button class="btn bg" id="gBtnS1" disabled onclick="gGoStep(2)">Next: Family &rarr;</button></div>
         </div>
-        <div id="gstep2" class="efris-only" style="display:none">
+        <div id="gstep2" style="display:none">
           <div class="ct">Step 2 &mdash; Family</div>
           <div id="gTrail2" style="font-size:11px;color:var(--gray);margin-bottom:7px;"></div>
           <div class="fg"><label>Filter families</label><input type="text" id="gFamFilter" placeholder="Type to filter families…" oninput="gFilterFams(this.value)" autocomplete="off"/></div>
           <div class="fg"><label>Family within selected segment *</label><select id="gFamSel" onchange="gOnFamChange()" size="6" style="height:auto;"><option value="">— Select family —</option></select></div>
           <div class="row"><button class="btn bo" onclick="gGoStep(1)">&larr; Back</button><button class="btn bg" id="gBtnS2" disabled onclick="gGoStep(3)">Next: Class &rarr;</button></div>
         </div>
-        <div id="gstep3" class="efris-only" style="display:none">
+        <div id="gstep3" style="display:none">
           <div class="ct">Step 3 &mdash; Class</div>
           <div id="gTrail3" style="font-size:11px;color:var(--gray);margin-bottom:7px;"></div>
           <div class="fg"><label>Filter classes</label><input type="text" id="gClsFilter" placeholder="Type to filter classes…" oninput="gFilterCls(this.value)" autocomplete="off"/></div>
           <div class="fg"><label>Class within selected family *</label><select id="gClsSel" onchange="gOnClsChange()" size="6" style="height:auto;"><option value="">— Select class —</option></select></div>
           <div class="row"><button class="btn bo" onclick="gGoStep(2)">&larr; Back</button><button class="btn bg" id="gBtnS3" disabled onclick="gGoStep(4)">Next: Commodity &rarr;</button></div>
         </div>
-        <div id="gstep4" class="efris-only" style="display:none">
+        <div id="gstep4" style="display:none">
           <div class="ct">Step 4 &mdash; Commodity</div>
           <div id="gTrail4" style="font-size:11px;color:var(--gray);margin-bottom:7px;"></div>
           <div class="fg"><label>Filter commodities</label><input type="text" id="gComFilter" placeholder="Type to filter commodities…" oninput="gFilterComs(this.value)" autocomplete="off"/></div>
@@ -675,6 +675,10 @@ function gApplyEfrisMode(){
   const on=CFG.efrisEnabled!==false;
   document.querySelectorAll('.efris-only').forEach(el=>{ el.style.display=on?'':'none'; });
   const banner=$('gNoEfrisBanner'); if(banner) banner.style.display=on?'none':'';
+  // Step visibility is owned by gGoStep — reset so steps don't all show stacked.
+  // Only reset if the Configure view is the active sub-tab.
+  const cfgVisible=$('gv-cfg') && $('gv-cfg').style.display!=='none';
+  if(cfgVisible) gGoStep(on?1:5);
   // Submit tab: disable/hide if EFRIS off
   const btnSub=$('btnSub'); if(btnSub){ btnSub.style.display=on?'':'none'; }
   const subHint=$('gSubHint');
