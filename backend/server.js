@@ -326,12 +326,22 @@ async function getSession(tin, deviceNo, password, efrisBaseUrl) {
 // whichever yields valid JSON.
 function efrisDecodeJson(b64, keyBytes) {
   const rawBuf = Buffer.from(b64, 'base64');
-  const okJson = s => { if (!s) return null; try { JSON.parse(s); return s; } catch(_) { return null; } };
+  const okJson = s => {
+    if (!s || s.length < 2) return null;
+    try { JSON.parse(s); return s; } catch(_) {}
+    // Tolerate trailing bytes: trim to the last closing brace/bracket and retry.
+    const cut = Math.max(s.lastIndexOf('}'), s.lastIndexOf(']'));
+    if (cut > 0) { const t = s.slice(0, cut + 1); try { JSON.parse(t); return t; } catch(_) {} }
+    return null;
+  };
+  // EFRIS gzip streams (Java GZIPOutputStream) are often not cleanly terminated,
+  // so Node's gunzip needs Z_SYNC_FLUSH to avoid "unexpected end of file".
+  const Z = { finishFlush: zlib.constants.Z_SYNC_FLUSH };
   const attempts = [];
+  attempts.push(() => zlib.gunzipSync(rawBuf, Z).toString('utf8'));              // gzip
+  attempts.push(() => zlib.inflateSync(rawBuf, Z).toString('utf8'));            // zlib deflate
+  attempts.push(() => zlib.inflateRawSync(rawBuf, Z).toString('utf8'));         // raw deflate
   attempts.push(() => rawBuf.toString('utf8'));                                  // plain
-  attempts.push(() => zlib.gunzipSync(rawBuf).toString('utf8'));                 // gzip
-  attempts.push(() => zlib.inflateSync(rawBuf).toString('utf8'));                // zlib deflate
-  attempts.push(() => zlib.inflateRawSync(rawBuf).toString('utf8'));             // raw deflate
   attempts.push(() => {                                                          // AES
     const d = crypto.createDecipheriv(aesAlgo(keyBytes), keyBytes, null);
     return Buffer.concat([d.update(rawBuf), d.final()]).toString('utf8');
@@ -339,7 +349,7 @@ function efrisDecodeJson(b64, keyBytes) {
   attempts.push(() => {                                                          // AES then gzip
     const d = crypto.createDecipheriv(aesAlgo(keyBytes), keyBytes, null);
     const b = Buffer.concat([d.update(rawBuf), d.final()]);
-    return zlib.gunzipSync(b).toString('utf8');
+    return zlib.gunzipSync(b, Z).toString('utf8');
   });
   for (const fn of attempts) {
     try { const s = okJson(fn()); if (s) return s; } catch(_) {}

@@ -327,16 +327,11 @@
           </div>
           <div class="fg"><label>Remarks</label><textarea id="gFldRemarks" placeholder="Optional notes..."></textarea></div>
           <div id="gSyncStatus"></div>
-          <div class="trow mt efris-only" style="cursor:pointer;" onclick="tg('gTogEfris','gRegEfris')">
-            <div>
-              <div class="tlbl">Also register in EFRIS goods registry</div>
-              <div class="tdsc">Requires EFRIS credentials in Settings. Optional — you can sync to Manager.io only.</div>
-            </div>
-            <div class="tog" id="gTogEfris"></div>
-          </div>
+          <div class="al ai efris-only" style="margin-top:6px;">&#128161; Sync to Manager.io to make the item usable on invoices. Register on EFRIS to add it to the URA goods registry (requires EFRIS credentials in Settings). You can do either or both.</div>
           <div class="row mt">
             <button class="btn bo" style="width:auto;flex:0 0 auto;" onclick="gGoStep(4)">&larr; Back</button>
-            <button class="btn bg" onclick="gSyncItem()">&#128228; Sync Item Profile to Manager.io Workspace</button>
+            <button class="btn bg" onclick="gSyncToManager()">&#128228; Sync to Manager.io</button>
+            <button class="btn bgld efris-only" onclick="gSyncToEfris()">&#128230; Register on EFRIS</button>
           </div>
         </div>
       </div>
@@ -955,67 +950,72 @@ document.addEventListener('click',function(e){
   if(dd&&!dd.contains(e.target)&&e.target.id!=='gFldUom') dd.style.display='none';
 });
 
-async function gSyncItem(){
+// Build an item object from the Step 5 form. Reuses an existing item with the
+// same code so sync status (managerSync/efrisSync) is preserved across the two
+// independent sync actions.
+function gBuildItemFromForm(){
   const code=gvi('gFldCode'), name=gvi('gFldName'), cur=gvi('gFldCur'),
         price=gvi('gFldPrice'), uom=gvi('gFldUom');
-  if(!code||!name||!cur||!price||!uom){ alert('Please fill all required fields: Code, Name, Currency, Price, Unit.'); return; }
-  const efrisOn=CFG.efrisEnabled!==false;
-  if(efrisOn&&!gCOM){ alert('Please complete the commodity wizard steps first.'); return; }
-  const item={
-    code, name, comCode:gCOM?gCOM.k:'', comName:gCOM?gCOM.n:'',
-    segment:gSEG?gSEG.n:'', segCode:gSEG?gSEG.k:'',
-    family:gFAM?gFAM.n:'', famCode:gFAM?gFAM.k:'',
-    cls:gCLS?gCLS.n:'', clsCode:gCLS?gCLS.k:'',
+  if(!code||!name||!cur||!price||!uom){ alert('Please fill all required fields: Code, Name, Currency, Price, Unit.'); return null; }
+  const existing=gItems.find(i=>(i.code||'').toLowerCase()===code.toLowerCase())||{};
+  const item=Object.assign({}, existing, {
+    code, name,
+    comCode:gCOM?gCOM.k:(existing.comCode||''), comName:gCOM?gCOM.n:(existing.comName||''),
+    segment:gSEG?gSEG.n:(existing.segment||''), segCode:gSEG?gSEG.k:(existing.segCode||''),
+    family:gFAM?gFAM.n:(existing.family||''), famCode:gFAM?gFAM.k:(existing.famCode||''),
+    cls:gCLS?gCLS.n:(existing.cls||''), clsCode:gCLS?gCLS.k:(existing.clsCode||''),
     uom, price:parseFloat(price)||0, cur,
     efrisUom:($('gFldEfrisUom')?$('gFldEfrisUom').value.trim().toUpperCase():''),
     type:$('gFldType').value, vat:$('gFldVat').value,
     excise:$('gFldExcise').value,
-    remarks:$('gFldRemarks')?$('gFldRemarks').value.trim():'',
-    managerSync:null, efrisSync:null,
-    id:Date.now()+'_'+Math.random().toString(36).slice(2)
-  };
+    remarks:$('gFldRemarks')?$('gFldRemarks').value.trim():''
+  });
+  if(!item.id) item.id=Date.now()+'_'+Math.random().toString(36).slice(2);
+  if(item.managerSync===undefined) item.managerSync=null;
+  if(item.efrisSync===undefined) item.efrisSync=null;
+  return item;
+}
+
+function gUpsertItem(item){
+  const idx=gItems.findIndex(i=>(i.code||'').toLowerCase()===(item.code||'').toLowerCase());
+  if(idx>=0){ gItems[idx]=item; } else { gItems.push(item); }
+  gEditingIdx=-1;
+  gSaveItems();
+  gRefreshList();
+}
+
+async function gSyncToManager(){
+  const item=gBuildItemFromForm(); if(!item) return;
   const statusEl=$('gSyncStatus');
-  statusEl.innerHTML='<div class="st si"><span class="sp">⏳</span> Syncing to Manager.io…</div>';
   const ep=CFG.managerEndpoint, tk=CFG.accessToken;
-  if(!ep||!tk){
-    item.managerSync='error';
-    statusEl.innerHTML='<div class="st se">❌ Manager.io not configured. Go to Settings first.</div>';
-    const xi=gItems.findIndex(i=>(i.code||'').toLowerCase()===(item.code||'').toLowerCase());
-    if(xi>=0){gItems[xi]=item;}else{gItems.push(item);}
-    gRefreshList(); return;
-  }
-  let mgrAction='created';
+  if(!ep||!tk){ item.managerSync='error'; statusEl.innerHTML='<div class="st se">❌ Manager.io not configured. Go to Settings first.</div>'; gUpsertItem(item); return; }
+  statusEl.innerHTML='<div class="st si"><span class="sp">⏳</span> Syncing to Manager.io…</div>';
   try{
     const r=await fetch(RELAY+'/api/goods/sync-to-manager',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({managerEndpoint:ep,accessToken:tk,item})});
     const d=await r.json();
     if(d.success){
-      item.managerSync='ok'; item.managerId=d.managerId||null; mgrAction=d.action||'created';
-      const actionLabel=mgrAction==='updated'?'✏️ Updated in Manager.io':'✅ Created in Manager.io';
+      item.managerSync='ok'; item.managerId=d.managerId||null;
+      const actionLabel=(d.action==='updated')?'✏️ Updated in Manager.io':'✅ Created in Manager.io';
       const cfNote=d.fieldsWritten?' + '+d.fieldsWritten+' EFRIS field(s) saved':'';
       statusEl.innerHTML='<div class="st ss">'+actionLabel+cfNote+'</div>';
-    } else {
-      item.managerSync='error';
-      statusEl.innerHTML='<div class="st se">❌ Manager sync failed: '+esc(d.error||'Unknown error')+'</div>';
-    }
+    } else { item.managerSync='error'; statusEl.innerHTML='<div class="st se">❌ Manager sync failed: '+esc(d.error||'Unknown error')+'</div>'; }
   }catch(e){ item.managerSync='error'; statusEl.innerHTML='<div class="st se">❌ Network error: '+esc(e.message)+'</div>'; }
+  gUpsertItem(item);
+}
 
-  if(item.managerSync==='ok' && TG.gRegEfris && CFG.tin && CFG.deviceNo){
-    const mgrLabel=mgrAction==='updated'?'✏️ Updated in Manager.io':'✅ Created in Manager.io';
-    statusEl.innerHTML='<div class="st ss">'+mgrLabel+'</div><div class="st si"><span class="sp">⏳</span> Registering in EFRIS goods registry…</div>';
-    try{
-      const r2=await fetch(RELAY+'/api/efris/register-goods',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tin:CFG.tin,deviceNo:CFG.deviceNo,efrisPassword:CFG.efrisPassword,mode:CFG.sandbox?'sandbox':'production',item})});
-      const d2=await r2.json();
-      if(d2.success){ item.efrisSync='ok'; statusEl.innerHTML='<div class="st ss">'+mgrLabel+' &amp; Registered in EFRIS!</div>'; }
-      else{ item.efrisSync='error'; statusEl.innerHTML='<div class="st ss">'+mgrLabel+'</div><div class="al aw">⚠ EFRIS: '+esc(d2.error||d2.returnMessage||'Failed')+'<br><small>Retry EFRIS registration later from My Items tab.</small></div>'; }
-    }catch(e2){ item.efrisSync='error'; statusEl.innerHTML='<div class="st ss">'+mgrLabel+'</div><div class="al aw">⚠ Could not reach EFRIS. Retry later.</div>'; }
-  } else if(item.managerSync==='ok' && TG.gRegEfris && (!CFG.tin||!CFG.deviceNo)){
-    statusEl.innerHTML='<div class="st ss">✅ Saved in Manager.io</div><div class="al aw">ℹ️ EFRIS skipped — add TIN and Device No. in Settings first.</div>';
-  }
-  const existingIdx=gItems.findIndex(i=>(i.code||'').toLowerCase()===(item.code||'').toLowerCase());
-  if(existingIdx>=0){ gItems[existingIdx]=item; } else { gItems.push(item); }
-  gEditingIdx=-1;
-  gSaveItems();
-  gRefreshList();
+async function gSyncToEfris(){
+  const item=gBuildItemFromForm(); if(!item) return;
+  const statusEl=$('gSyncStatus');
+  if(!gCOM && !item.comCode){ alert('Pick a commodity category first (steps 1–4) so EFRIS knows the goods category.'); return; }
+  if(!CFG.tin||!CFG.deviceNo){ statusEl.innerHTML='<div class="al aw">ℹ️ EFRIS skipped — add TIN and Device No. in Settings first.</div>'; return; }
+  statusEl.innerHTML='<div class="st si"><span class="sp">⏳</span> Registering in EFRIS goods registry…</div>';
+  try{
+    const r2=await fetch(RELAY+'/api/efris/register-goods',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tin:CFG.tin,deviceNo:CFG.deviceNo,efrisPassword:CFG.efrisPassword,mode:CFG.sandbox?'sandbox':'production',item})});
+    const d2=await r2.json();
+    if(d2.success){ item.efrisSync='ok'; statusEl.innerHTML='<div class="st ss">✅ Registered in EFRIS goods registry!</div>'; }
+    else{ item.efrisSync='error'; statusEl.innerHTML='<div class="al aw">⚠ EFRIS: '+esc(d2.error||d2.returnMessage||'Failed')+'</div>'; }
+  }catch(e2){ item.efrisSync='error'; statusEl.innerHTML='<div class="al aw">⚠ Could not reach EFRIS. Retry later.</div>'; }
+  gUpsertItem(item);
 }
 
 function gRefreshList(){
