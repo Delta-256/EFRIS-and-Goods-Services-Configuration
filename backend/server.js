@@ -337,20 +337,18 @@ function efrisDecodeJson(b64, keyBytes) {
   // EFRIS gzip streams (Java GZIPOutputStream) are often not cleanly terminated,
   // so Node's gunzip needs Z_SYNC_FLUSH to avoid "unexpected end of file".
   const Z = { finishFlush: zlib.constants.Z_SYNC_FLUSH };
+  const aesDec = buf => {
+    const d = crypto.createDecipheriv(aesAlgo(keyBytes), keyBytes, null);
+    return Buffer.concat([d.update(buf), d.final()]);
+  };
   const attempts = [];
-  attempts.push(() => zlib.gunzipSync(rawBuf, Z).toString('utf8'));              // gzip
+  attempts.push(() => zlib.gunzipSync(rawBuf, Z).toString('utf8'));              // gzip(json)
+  attempts.push(() => aesDec(zlib.gunzipSync(rawBuf, Z)).toString('utf8'));      // gzip(AES(json)) ← EFRIS dictionary
   attempts.push(() => zlib.inflateSync(rawBuf, Z).toString('utf8'));            // zlib deflate
   attempts.push(() => zlib.inflateRawSync(rawBuf, Z).toString('utf8'));         // raw deflate
   attempts.push(() => rawBuf.toString('utf8'));                                  // plain
-  attempts.push(() => {                                                          // AES
-    const d = crypto.createDecipheriv(aesAlgo(keyBytes), keyBytes, null);
-    return Buffer.concat([d.update(rawBuf), d.final()]).toString('utf8');
-  });
-  attempts.push(() => {                                                          // AES then gzip
-    const d = crypto.createDecipheriv(aesAlgo(keyBytes), keyBytes, null);
-    const b = Buffer.concat([d.update(rawBuf), d.final()]);
-    return zlib.gunzipSync(b, Z).toString('utf8');
-  });
+  attempts.push(() => aesDec(rawBuf).toString('utf8'));                          // AES(json)
+  attempts.push(() => zlib.gunzipSync(aesDec(rawBuf), Z).toString('utf8'));      // AES(gzip(json))
   for (const fn of attempts) {
     try { const s = okJson(fn()); if (s) return s; } catch(_) {}
   }
