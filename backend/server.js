@@ -313,12 +313,23 @@ async function getEfrisDictionary(tin, deviceNo, session, eu) {
   if (_dictCache[key]) return _dictCache[key];
   try {
     const t115 = await efrisCall(eu, efrisEnvEnc('T115', {}, tin, deviceNo, session.aesKey, session.privatePem));
+    const rc = t115.data && t115.data.returnStateInfo ? t115.data.returnStateInfo.returnCode : null;
+    const rm = t115.data && t115.data.returnStateInfo ? t115.data.returnStateInfo.returnMessage : '';
+    console.log(`   T115 outer rc: ${rc} — ${rm}`);
     if (t115.data && t115.data.data && t115.data.data.content) {
-      const raw = aesDecryptStr(t115.data.data.content, session.aesKey);
-      const dict = JSON.parse(raw);
-      console.log(`   T115 dictionary loaded — top-level keys: ${Object.keys(dict).join(', ')}`);
-      _dictCache[key] = dict;
-      return dict;
+      let raw = null;
+      // Successful responses are AES-encrypted; error envelopes are plain base64.
+      try { raw = aesDecryptStr(t115.data.data.content, session.aesKey); }
+      catch(_) { try { raw = Buffer.from(t115.data.data.content, 'base64').toString('utf8'); } catch(__) {} }
+      if (raw) {
+        console.log(`   T115 raw content (first 300): ${raw.slice(0, 300)}`);
+        try {
+          const dict = JSON.parse(raw);
+          console.log(`   T115 dictionary loaded — top-level keys: ${Object.keys(dict).join(', ')}`);
+          _dictCache[key] = dict;
+          return dict;
+        } catch(e) { console.log(`   (T115 content not JSON: ${e.message})`); }
+      }
     }
   } catch(e) { console.log(`   (T115 dictionary fetch failed: ${e.message})`); }
   return null;
