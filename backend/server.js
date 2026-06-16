@@ -321,6 +321,32 @@ async function getSession(tin, deviceNo, password, efrisBaseUrl) {
 // T130's `currency` field wants the EFRIS internal currency code, NOT the ISO
 // string ("UGX" is rejected with rc:680). We fetch the dictionary once, cache it
 // on the session, and map ISO → EFRIS code.
+// Brute-force decoder: EFRIS signals encryption/compression in the response's
+// dataDescription, but it varies by interface. Try every combination and keep
+// whichever yields valid JSON.
+function efrisDecodeJson(b64, keyBytes) {
+  const rawBuf = Buffer.from(b64, 'base64');
+  const okJson = s => { if (!s) return null; try { JSON.parse(s); return s; } catch(_) { return null; } };
+  const attempts = [];
+  attempts.push(() => rawBuf.toString('utf8'));                                  // plain
+  attempts.push(() => zlib.gunzipSync(rawBuf).toString('utf8'));                 // gzip
+  attempts.push(() => zlib.inflateSync(rawBuf).toString('utf8'));                // zlib deflate
+  attempts.push(() => zlib.inflateRawSync(rawBuf).toString('utf8'));             // raw deflate
+  attempts.push(() => {                                                          // AES
+    const d = crypto.createDecipheriv(aesAlgo(keyBytes), keyBytes, null);
+    return Buffer.concat([d.update(rawBuf), d.final()]).toString('utf8');
+  });
+  attempts.push(() => {                                                          // AES then gzip
+    const d = crypto.createDecipheriv(aesAlgo(keyBytes), keyBytes, null);
+    const b = Buffer.concat([d.update(rawBuf), d.final()]);
+    return zlib.gunzipSync(b).toString('utf8');
+  });
+  for (const fn of attempts) {
+    try { const s = okJson(fn()); if (s) return s; } catch(_) {}
+  }
+  return null;
+}
+
 const _dictCache = {};
 async function getEfrisDictionary(tin, deviceNo, session, eu) {
   const key = tin + '_' + deviceNo;
@@ -330,20 +356,20 @@ async function getEfrisDictionary(tin, deviceNo, session, eu) {
     const rc = t115.data && t115.data.returnStateInfo ? t115.data.returnStateInfo.returnCode : null;
     const rm = t115.data && t115.data.returnStateInfo ? t115.data.returnStateInfo.returnMessage : '';
     console.log(`   T115 outer rc: ${rc} — ${rm}`);
-    if (t115.data && t115.data.data && t115.data.data.content) {
-      let raw = null;
-      // Successful responses are AES-encrypted (and often gzip-compressed);
-      // error envelopes are plain base64.
-      try { raw = aesDecryptMaybeGzip(t115.data.data.content, session.aesKey); }
-      catch(_) { try { raw = Buffer.from(t115.data.data.content, 'base64').toString('utf8'); } catch(__) {} }
-      if (raw) {
-        console.log(`   T115 raw content (first 300): ${raw.slice(0, 300)}`);
-        try {
+    if (t115.data && t115.data.data) {
+      // Log how EFRIS says the response is encoded + the raw byte signature
+      console.log(`   T115 dataDescription: ${JSON.stringify(t115.data.data.dataDescription || {})}`);
+      if (t115.data.data.content) {
+        const sig = Buffer.from(t115.data.data.content, 'base64').slice(0, 6).toString('hex');
+        console.log(`   T115 content byte signature (hex): ${sig}`);
+        const raw = efrisDecodeJson(t115.data.data.content, session.aesKey);
+        if (raw) {
           const dict = JSON.parse(raw);
           console.log(`   T115 dictionary loaded — top-level keys: ${Object.keys(dict).join(', ')}`);
           _dictCache[key] = dict;
           return dict;
-        } catch(e) { console.log(`   (T115 content not JSON: ${e.message})`); }
+        }
+        console.log(`   (T115 content could not be decoded to JSON by any method)`);
       }
     }
   } catch(e) { console.log(`   (T115 dictionary fetch failed: ${e.message})`); }
