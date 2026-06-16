@@ -281,6 +281,7 @@
           <div id="gComSummary" class="g-sel-badge efris-only" style="margin-bottom:10px"></div>
           <div class="fg efris-only"><label>EFRIS Segment / Class Grouping</label><input type="text" id="gFldGrouping" readonly/></div>
           <div class="fg efris-only"><label>Target URA Commodity Code *</label><input type="text" id="gFldComCode" readonly/></div>
+          <button class="btn bo efris-only" id="gPickComBtn" style="margin-bottom:8px;" onclick="gStartCommodityPicker()">&#128194; Choose / change EFRIS commodity category</button>
           <div class="fg"><label>My Product Code (Internal Code) *</label><input type="text" id="gFldCode" placeholder="e.g. Test 002"/></div>
           <div class="fg"><label>Item Description Name (Invoice Display Value) *</label><input type="text" id="gFldName" placeholder="e.g. Sipi Falls Easter Excursion"/></div>
           <div class="g2">
@@ -711,6 +712,17 @@ function gSwSub(t){
   if(t==='cfg'&&CFG.efrisEnabled===false){ gGoStep(5); }
 }
 
+// Launch the Segment→Commodity wizard from Step 5 without losing entered details.
+// Used when an item was synced to Manager only and now needs an EFRIS category.
+function gStartCommodityPicker(){
+  gSEG=gFAM=gCLS=gCOM=null;
+  const ss=$('gSegSel'); if(ss){ ss.style.display='none'; }
+  const si=$('gSegInp'); if(si){ si.value=''; }
+  const sr=$('gSegResults'); if(sr){ sr.innerHTML=''; }
+  const b1=$('gBtnS1'); if(b1){ b1.disabled=true; }
+  gGoStep(1);
+}
+
 function gOnGoodsTabOpen(){ if(!gUnitsLoaded) gLoadUnits(); }
 
 async function gLoadUnits(){
@@ -1029,7 +1041,14 @@ async function gSyncToEfris(){
   try{
     const r2=await fetch(RELAY+'/api/efris/register-goods',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tin:CFG.tin,deviceNo:CFG.deviceNo,efrisPassword:CFG.efrisPassword,mode:CFG.sandbox?'sandbox':'production',item})});
     const d2=await r2.json();
-    if(d2.success){ item.efrisSync='ok'; statusEl.innerHTML='<div class="st ss">✅ Registered in EFRIS goods registry!</div>'; }
+    if(d2.success){
+      item.efrisSync='ok';
+      if(d2.alreadyExists){
+        statusEl.innerHTML='<div class="al aw">ℹ️ Goods code <strong>'+esc(item.code)+'</strong> is <strong>already registered</strong> in EFRIS.<br>EFRIS does not allow changing a registered item’s details (price, unit, name) through the API. To edit it, log into the EFRIS portal &rarr; Goods/Services &rarr; Modify.<br><small>If this code actually belongs to a <em>different</em> product, give that product a unique code.</small></div>';
+      } else {
+        statusEl.innerHTML='<div class="st ss">✅ Registered in EFRIS goods registry!</div>';
+      }
+    }
     else{ item.efrisSync='error'; statusEl.innerHTML='<div class="al aw">⚠ EFRIS: '+esc(d2.error||d2.returnMessage||'Failed')+'</div>'; }
   }catch(e2){ item.efrisSync='error'; statusEl.innerHTML='<div class="al aw">⚠ Could not reach EFRIS. Retry later.</div>'; }
   gUpsertItem(item);
@@ -1135,7 +1154,7 @@ async function gRetrySyncEfris(i){
   try{
     const r=await fetch(RELAY+'/api/efris/register-goods',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tin:CFG.tin,deviceNo:CFG.deviceNo,efrisPassword:CFG.efrisPassword,mode:CFG.sandbox?'sandbox':'production',item:it})});
     const d=await r.json();
-    if(d.success){ it.efrisSync='ok'; gSaveItems(); gRefreshList(); }
+    if(d.success){ it.efrisSync='ok'; gSaveItems(); gRefreshList(); if(d.alreadyExists){ alert('Goods code "'+it.code+'" is already registered in EFRIS. EFRIS does not allow editing a registered item via the API — edit it in the EFRIS portal (Goods/Services → Modify) if you need to change its details.'); } }
     else{ alert('EFRIS registration failed: '+(d.error||d.returnMessage||'Unknown error')); btn.disabled=false; btn.textContent='↑ EFRIS'; }
   }catch(e){ alert('Network error: '+e.message); btn.disabled=false; btn.textContent='↑ EFRIS'; }
 }
