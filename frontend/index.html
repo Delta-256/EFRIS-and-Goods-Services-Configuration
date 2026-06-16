@@ -293,8 +293,15 @@
           </div>
           <div class="fg"><label>Package Measure Unit *</label>
             <div class="g-uom-wrap">
-              <input type="text" id="gFldUom" placeholder="e.g. Per Person, Each, Kilogram" autocomplete="off" oninput="gUomInput(this.value)" onfocus="gUomInput(this.value)"/>
+              <input type="text" id="gFldUom" placeholder="e.g. Per Person, Each, Kilogram" autocomplete="off" oninput="gUomInput(this.value)" onfocus="gUomInput(this.value)" onblur="gAutoEfrisUom(this.value)"/>
               <div class="g-uom-dd" id="gUomDd" style="display:none"></div>
+            </div>
+          </div>
+          <div class="fg" style="margin-top:-8px;">
+            <label style="font-size:10px;color:var(--gray);">EFRIS Unit Code <span style="font-weight:normal;">(auto-detected · edit if needed · max 3 chars)</span></label>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <input type="text" id="gFldEfrisUom" maxlength="5" placeholder="e.g. PP" style="width:80px;font-family:monospace;text-transform:uppercase;" oninput="this.value=this.value.toUpperCase()"/>
+              <span id="gEfrisUomDesc" style="font-size:11px;color:var(--gray);"></span>
             </div>
           </div>
           <div class="fg"><label>&#9881; Item Profile Category</label>
@@ -826,7 +833,87 @@ function gUomInput(v){
   dd.style.display=html?'':'none';
 }
 
-function gPickUom(val){ $('gFldUom').value=val; $('gUomDd').style.display='none'; }
+function gPickUom(val){ $('gFldUom').value=val; $('gUomDd').style.display='none'; gAutoEfrisUom(val); }
+
+const _EFRIS_UOM_MAP = {
+  'per person':'PP','per pax':'PP','per adult':'PP','per child':'PP','per guest':'PP','per infant':'PP','per participant':'PP','per student':'PP',
+  'per night':'PN2','per day':'PD2','per hour':'PH2','per week':'PW2','per month':'PM2','per year':'PY2','per annum':'PY2',
+  'per trip':'PT2','per group':'PG2','per couple':'CP2','per family':'PFM','per quarter':'PQ2','per shift':'PS2','per session':'PSN','per event':'PEV','per service':'PSV',
+  'square metre':'MTK','square meter':'MTK','sq m':'MTK','sq metre':'MTK','sq meter':'MTK','per square metre':'MTK','per square meter':'MTK','m2':'MTK','sqm':'MTK','psm':'MTK',
+  'metre':'MTR','meter':'MTR','linear metre':'MTR','mtр':'MTR',
+  'cubic metre':'MTQ','cubic meter':'MTQ','m3':'MTQ',
+  'kilogram':'KGM','kg':'KGM','per kg':'KGM','kgm':'KGM',
+  'gram':'GRM','grams':'GRM','per gram':'GRM',
+  'litre':'LTR','liter':'LTR','per litre':'LTR','per liter':'LTR','lt':'LTR','ltr':'LTR',
+  'dozen':'DZN','12':'DZN',
+  'pair':'NPR','pairs':'NPR',
+  'yard':'YRD','yards':'YRD',
+  'metric ton':'TNE','tonne':'TNE','ton':'TNE','tonnes':'TNE',
+  'piece':'PCE','pieces':'PCE','pce':'PCE',
+  'set':'SET',
+  'unit':'UN','each':'UN',
+  'kilometre':'KM','kilometer':'KM','km':'KM','kilometres':'KM',
+  'kilowatt hour':'KWH','kwh':'KWH','kilo watt hour':'KWH','kwh -kilo watt hour':'KWH',
+  'megawatt hour':'MWH','mwh':'MWH','mega watt hour':'MWH',
+  'kilowatt':'KWT','kw':'KWT',
+  'hour':'HR','hours':'HR','hr':'HR',
+  'minute':'MIN','minutes':'MIN','min':'MIN',
+  'vehicle':'VEH',
+  'roll':'RO','rolls':'RO',
+  'box':'BX','boxes':'BX',
+  'bag':'BG','bags':'BG',
+  'carton':'CT','cartons':'CT',
+  'barrel':'BA','barrels':'BA',
+  'package':'PK','pack':'PK','packs':'PK',
+  'bundle':'BE','bundles':'BE',
+  'bottle':'BO','bottles':'BO',
+  'sack':'SA','sacks':'SA',
+  'pallet':'PX','pallets':'PX',
+  'reel':'RL','reels':'RL',
+  'tube':'TU','tubes':'TU',
+  'tin':'TN','tins':'TN',
+  'drum':'DR','drums':'DR',
+  'canister':'CI',
+  'cylinder':'CY',
+  'sachet':'SH','sachets':'SH',
+  'stick':'ST','sticks':'ST',
+};
+
+const _EFRIS_UOM_NAMES = {};
+
+async function gAutoEfrisUom(val){
+  if(!val){return;}
+  const key=val.trim().toLowerCase();
+  // 1. Exact map match
+  if(_EFRIS_UOM_MAP[key]){
+    const code=_EFRIS_UOM_MAP[key];
+    sv('gFldEfrisUom',code);
+    gShowEfrisUomDesc(code);
+    return;
+  }
+  // 2. Load units and try exact name match
+  try{
+    const units=await fetch(RELAY+'/api/units').then(r=>r.json());
+    const match=units.find(u=>u.name.toLowerCase()===key);
+    if(match){sv('gFldEfrisUom',match.code);gShowEfrisUomDesc(match.code,match.name);return;}
+    // 3. If already ≤3 chars, treat as a code
+    if(val.trim().length<=3){sv('gFldEfrisUom',val.trim().toUpperCase());gShowEfrisUomDesc(val.trim().toUpperCase());return;}
+    // 4. No match — clear and hint
+    const e=$('gEfrisUomDesc');
+    if(e)e.textContent='⚠ Not recognised — type the 1–3 char EFRIS code manually';
+  }catch(_){}
+}
+
+function gShowEfrisUomDesc(code,name){
+  const e=$('gEfrisUomDesc');
+  if(!e)return;
+  if(name){e.textContent='→ '+name;return;}
+  // Try to find name from loaded units
+  fetch(RELAY+'/api/units').then(r=>r.json()).then(units=>{
+    const u=units.find(u=>u.code===code);
+    e.textContent=u?'→ '+u.name:'';
+  }).catch(()=>{e.textContent='';});
+}
 
 document.addEventListener('click',function(e){
   const dd=$('gUomDd');
@@ -844,6 +931,7 @@ async function gSyncItem(){
     family:gFAM?gFAM.n:'', famCode:gFAM?gFAM.k:'',
     cls:gCLS?gCLS.n:'', clsCode:gCLS?gCLS.k:'',
     uom, price:parseFloat(price)||0, cur,
+    efrisUom:($('gFldEfrisUom')?$('gFldEfrisUom').value.trim().toUpperCase()||uom:''),
     type:$('gFldType').value, vat:$('gFldVat').value,
     excise:$('gFldExcise').value,
     remarks:$('gFldRemarks')?$('gFldRemarks').value.trim():'',
@@ -1012,6 +1100,7 @@ async function gImportManagerItem(idx){
     sv('gFldCode', code);
     sv('gFldName', name);
     sv('gFldUom',  unitName);
+    setTimeout(()=>gAutoEfrisUom(unitName||''),100);
     if(price>0) sv('gFldPrice', String(price));
     if(remarks){ const rEl=$('gFldRemarks'); if(rEl) rEl.value=remarks; }
     const typeEl=$('gFldType');
