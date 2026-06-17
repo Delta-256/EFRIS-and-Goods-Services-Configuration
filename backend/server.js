@@ -1040,20 +1040,19 @@ app.post('/api/efris/submit-invoice', async (req, res) => {
         const bi = d.basicInformation || {};
         fdn = d.fdn || d.fiscalDocumentNumber || bi.invoiceNo || bi.fdn;
         antifakeCode = d.antiFakeCode || d.antifakeCode || bi.antifakeCode || bi.antiFakeCode;
+        const issuedDate = bi.issuedDate || bi.issueDate || d.issuedDate || '';
+        const deviceNo = bi.deviceNo || bi.deviceNumber || d.deviceNo || config.deviceNo || '';
         qrCode = d.qrCode || d.qrCodeBase64 || bi.qrCode;
-        // URA doesn't return a QR URL — construct it from the antifake code
-        if (!qrCode && antifakeCode) {
-          const base = config.mode === 'production'
-            ? 'https://efris.ura.go.ug/efrisui/app/home/efrisVerify'
-            : 'https://efristest.ura.go.ug/efrisui/app/home/efrisVerify';
-          qrCode = `${base}?antifakeCode=${antifakeCode}`;
-        }
-        console.log(`   T109 result — FDN: ${fdn}, antifakeCode: ${antifakeCode}, qrCode: ${qrCode}`);
+        // Store antifakeCode as the QR content — Manager's "QR Code" type field
+        // renders whatever text is stored as a QR image on printed documents.
+        // A plain numeric string (no URL special chars) renders reliably.
+        if (!qrCode && antifakeCode) qrCode = antifakeCode;
+        console.log(`   T109 result — FDN: ${fdn}, antifakeCode: ${antifakeCode}, deviceNo: ${deviceNo}, issuedDate: ${issuedDate}, qrCode: ${qrCode}`);
       }
     } catch(e) { console.log(`   T109 content parse error: ${e.message}`); }
     const ok = rc === '00' || !!fdn;
     res.json(ok
-      ? { success: true, fdn, qrCode, antifakeCode, returnCode: rc, returnMessage: rm }
+      ? { success: true, fdn, qrCode, antifakeCode, deviceNo: config.deviceNo, issuedDate: new Date().toISOString(), returnCode: rc, returnMessage: rm }
       : { success: false, error: 'URA ' + rc + ': ' + rm, returnCode: rc });
   } catch(e) {
     res.status(500).json({ success: false, error: e.message });
@@ -1081,9 +1080,13 @@ app.post('/api/efris/save-to-manager', async (req, res) => {
     form.CustomFields2 = form.CustomFields2 || {};
     form.CustomFields2.Strings = form.CustomFields2.Strings || {};
     const setCF = (name, val) => { const k = cf.byName[name]; if (k && val != null && val !== '') form.CustomFields2.Strings[k] = String(val); };
+    const setCFAny = (names, val) => { for (const n of names) { const k = cf.byName[n]; if (k && val != null && val !== '') { form.CustomFields2.Strings[k] = String(val); break; } } };
     setCF('EFRIS FDN', efrisData.fdn);
     setCF('EFRIS Antifake Code', efrisData.antifakeCode);
-    setCF('EFRIS QR Code URL', efrisData.qrCode);
+    // QR Code field: store antifake code — Manager "QR Code" type renders it as QR image
+    setCFAny(['EFRIS QR Code URL', 'EFRIS QR Code'], efrisData.qrCode || efrisData.antifakeCode);
+    setCFAny(['EFRIS Device Number', 'Device Number'], efrisData.deviceNo);
+    setCFAny(['EFRIS Issued Time', 'Issued Time'], efrisData.issuedDate ? new Date(efrisData.issuedDate).toLocaleString('en-UG', { timeZone: 'Africa/Kampala' }) : '');
     setCF('EFRIS Status', 'Submitted');
     setCF('EFRIS Submission Date', new Date().toISOString().slice(0,10));
     const postR = await managerCall(ep, accessToken, 'POST', formBase + '/' + key, form);
