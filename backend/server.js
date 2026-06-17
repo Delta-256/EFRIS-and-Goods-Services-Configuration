@@ -508,19 +508,24 @@ function buildT109(invoice, cfg) {
   const taxAmount = goodsDetails.reduce((s, g) => s + (parseFloat(g.tax) || 0), 0);
   const net = gross - taxAmount;
   const anyVat = goodsDetails.some(g => g.taxRate === '0.18');
-  const catCode = goodsDetails[0] ? goodsDetails[0]._catCode : (anyVat ? '01' : '05');
+  const catCode = goodsDetails[0] ? goodsDetails[0]._catCode : (anyVat ? '01' : '03');
   goodsDetails.forEach(g => delete g._catCode);
   const now = new Date();
   const d = invoice.IssueDate ? new Date(invoice.IssueDate) : now;
   const p = n => String(n).padStart(2, '0');
   const issuedDate = p(d.getDate()) + '/' + p(d.getMonth()+1) + '/' + d.getFullYear() + ' ' + p(now.getHours()) + ':' + p(now.getMinutes()) + ':' + p(now.getSeconds());
   const hasTin = !!(invoice.CustomerTIN && String(invoice.CustomerTIN).trim());
+  // Non-VAT e-receipts (invoiceKind=2): no tax categories apply — omit taxDetails
+  // entirely. The taxRule='OOS' on each goodsDetails line carries the designation.
+  const taxDetails = vat
+    ? [{ taxCategoryCode: catCode, netAmount: r2(net), taxRate: (goodsDetails[0] ? goodsDetails[0].taxRate : (anyVat ? '0.18' : '0')), taxAmount: r2(taxAmount), grossAmount: r2(gross) }]
+    : [];
   return {
     sellerDetails: { tin: cfg.tin, ninBrn: cfg.brn || '', legalName: cfg.businessName || cfg.tradeName || '', businessName: cfg.tradeName || cfg.businessName || '', address: cfg.businessAddress || 'Uganda', mobilePhone: cfg.phone || '', linePhone: '', emailAddress: cfg.email || '', placeOfBusiness: cfg.businessAddress || 'Uganda', referenceNo: invoice.Reference || '' },
     basicInformation: { invoiceNo: '', antifakeCode: '', deviceNo: cfg.deviceNo, issuedDate, operator: cfg.businessName || cfg.tradeName || 'system', currency: invoice.Currency || 'UGX', oriInvoiceId: '', invoiceType: '1', invoiceKind: vat ? '1' : '2', dataSource: '103', invoiceIndustryCode: '101', isBatch: '0' },
     buyerDetails: { buyerTin: hasTin ? String(invoice.CustomerTIN) : '', buyerNinBrn: '', buyerPassportNum: '', buyerLegalName: invoice.CustomerName || 'Walk-in Customer', buyerBusinessName: invoice.CustomerName || '', buyerAddress: invoice.CustomerAddress || '', buyerEmail: '', buyerMobilePhone: '', buyerLinePhone: '', buyerPlaceOfBusi: '', buyerType: hasTin ? '0' : '1', buyerCitizenship: '', buyerSector: '', buyerReferenceNo: '' },
     goodsDetails,
-    taxDetails: [{ taxCategoryCode: catCode, netAmount: r2(net), taxRate: (goodsDetails[0] ? goodsDetails[0].taxRate : (anyVat ? '0.18' : '0')), taxAmount: r2(taxAmount), grossAmount: r2(gross) }],
+    taxDetails,
     summary: { netAmount: r2(net), taxAmount: r2(taxAmount), grossAmount: r2(gross), itemCount: String(goodsDetails.length), modeCode: '1', remarks: invoice.Notes || '', qrCode: '' },
     payWay: [{ paymentMode: '101', paymentAmount: r2(gross), orderNumber: '1' }],
     extend: {}
