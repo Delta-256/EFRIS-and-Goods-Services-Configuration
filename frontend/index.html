@@ -202,8 +202,22 @@
         <input id="cTIN" placeholder="Leave blank for B2C receipts"/>
       </div>
       <div id="subDone" class="hidden"><div class="al as">&#10003; Already submitted &mdash; FDN: <strong id="exFDN"></strong></div></div>
+      <div class="fg mt">
+        <label>Payment Mode</label>
+        <select id="payMode">
+          <option value="101">Cash</option>
+          <option value="102">Credit</option>
+          <option value="103">Debit Card</option>
+          <option value="104">Mobile Money</option>
+          <option value="105">Cheque</option>
+          <option value="106">Bank Transfer</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px;">
+        <button class="btn bo bsm" onclick="doPreview()" style="flex:0 0 auto;">&#128065; Preview</button>
+        <button class="btn bg" id="btnSub" onclick="doSubmit()" style="flex:1;">&#128228; Submit to URA EFRIS</button>
+      </div>
       <div id="subProg"></div>
-      <button class="btn bg" id="btnSub" onclick="doSubmit()">&#128228; Submit to URA EFRIS</button>
     </div>
     <div class="rcard hidden" id="rCard">
       <h4>&#10003; Successfully submitted to URA EFRIS</h4>
@@ -223,9 +237,10 @@
   <div id="tStat" class="hidden">
     <div class="card"><div class="ct">&#128203; EFRIS Status</div><div id="statCont"><div style="color:var(--gray);font-size:11px;text-align:center;padding:14px;">Open an invoice to see its status</div></div></div>
     <div class="card">
-      <div class="ct">&#128269; Verify on URA Portal</div>
-      <div class="fg"><label>FDN to verify</label><input id="fdnQ" placeholder="Paste FDN here"/></div>
-      <button class="btn bo" onclick="openVerify()">&#128279; Open URA Verification Page</button>
+      <div class="ct">&#128373; Verify Taxpayer TIN</div>
+      <div class="fg"><label>TIN to verify <span style="font-weight:400;color:var(--gray)">(B2B customer lookup)</span></label><input id="tinQ" placeholder="Enter TIN number"/></div>
+      <button class="btn bo" onclick="doVerifyTin()">&#128269; Verify TIN on EFRIS</button>
+      <div id="tinResult" class="mt"></div>
     </div>
   </div>
 
@@ -576,7 +591,7 @@ function renderInv(inv){
   tx('dTot',(inv.Currency||'UGX')+' '+fn(inv.Total||inv.GrossAmount||0));
   const curr=inv.Currency||'UGX';
   if(curr!=='UGX'){sh('fxRow');tx('fxLbl',curr);sv('fxVal',inv.ExchangeRate||'');}else hd('fxRow');
-  const fdn=inv.CustomFields&&inv.CustomFields['EFRIS FDN'];
+  const fdn=(inv.CustomFields&&(inv.CustomFields['Fiscal Document Number']||inv.CustomFields['EFRIS FDN']))||'';
   if(fdn){sh('subDone');tx('exFDN',fdn);}else hd('subDone');
   const lines=inv.Lines||inv.Items||[];
   if(lines.length){
@@ -586,7 +601,12 @@ function renderInv(inv){
     h+='</div>';ht('dItems',h);
   }
   const s=inv.CustomFields||{};
-  ht('statCont','<div class="ig"><div class="if"><div class="lb">Status</div><div class="vl">'+(s['EFRIS Status']||'Not submitted')+'</div></div><div class="if"><div class="lb">Date</div><div class="vl">'+(s['EFRIS Submission Date']||'—')+'</div></div><div class="if full"><div class="lb">FDN</div><div class="vl">'+(s['EFRIS FDN']||'—')+'</div></div></div>'+(s['EFRIS Error Message']?'<div class="al aw">Last error: '+s['EFRIS Error Message']+'</div>':''));
+  const sGet=(...k)=>{ for(const n of k){if(s[n])return s[n];} return null; };
+  const sFdn=sGet('Fiscal Document Number','EFRIS FDN');
+  const sSt=sGet('Status','EFRIS Status');
+  const sDt=sGet('Submission Date','EFRIS Submission Date');
+  const sVer=sGet('Verification Code','EFRIS Antifake Code');
+  ht('statCont','<div class="ig"><div class="if"><div class="lb">Status</div><div class="vl '+(sSt==='Submitted'?'vg':'')+'">&#8203;'+(sSt||'Not submitted')+'</div></div><div class="if"><div class="lb">Submission Date</div><div class="vl">'+(sDt||'—')+'</div></div><div class="if full"><div class="lb">Fiscal Document Number</div><div class="vl">'+(sFdn||'—')+'</div></div>'+(sVer?'<div class="if full"><div class="lb">Verification Code</div><div class="vl">'+(sVer)+'</div></div>':'')+'</div>'+(s['EFRIS Error Message']?'<div class="al aw">Last error: '+s['EFRIS Error Message']+'</div>':''));
 }
 
 window.__invList=[];
@@ -612,7 +632,8 @@ function buildInv(){
   const inv=INV||{};const fx=parseFloat(gvi('fxVal')||'1')||1;
   return{ Reference:inv.Reference||inv.Code||'INV-001', IssueDate:inv.IssueDate||inv.Date||new Date().toISOString().slice(0,10),
     CustomerName:(inv.Customer&&inv.Customer.Name)||inv.CustomerName||'', CustomerTIN:gvi('cTIN')||(inv.CustomFields&&inv.CustomFields['Customer TIN'])||'',
-    CustomerAddress:(inv.Customer&&inv.Customer.Address)||'', Currency:'UGX', ExchangeRate:'1',
+    CustomerAddress:(inv.Customer&&inv.Customer.Address)||'', Currency:inv.Currency||'UGX', ExchangeRate:fx,
+    PaymentMode:gvi('payMode')||'101',
     Total:(inv.Total||0)*fx, AmountExcludingTax:(inv.AmountExcludingTax||0)*fx, TaxAmount:(inv.TaxAmount||0)*fx, Notes:inv.Notes||'',
     Lines:(inv.Lines||inv.Items||[]).map(l=>({ ItemName:l.ItemName||l.Description||l.Account||'Service',
       ItemCode:l.ItemCode||l.Code||'',
@@ -640,7 +661,7 @@ async function doSubmit(){
     if(!d1.success)throw new Error(d1.error||'EFRIS submission failed');
     sh('rCard');tx('rFDN',d1.fdn||'—');tx('rAF',d1.antifakeCode||'—');
     steps[4].st='act';setProg(steps);
-    await saveMgr(d1.fdn,d1.qrCode,d1.antifakeCode);
+    await saveMgr(d1.fdn,d1.qrCode,d1.antifakeCode,d1.deviceNo,d1.issuedDate);
     steps[4].st='don';setProg(steps);
   }catch(err){
     console.error(err); showErr(err.message);
@@ -649,11 +670,11 @@ async function doSubmit(){
   btn.disabled=false;btn.innerHTML='📤 Submit to URA EFRIS';
 }
 
-async function saveMgr(fdn,qrCode,antifakeCode){
+async function saveMgr(fdn,qrCode,antifakeCode,deviceNo,issuedDate){
   const ep=CFG.managerEndpoint||MGR_EP, tk=CFG.accessToken||MGR_TK;
   if(!ep||!tk||!DKEY){ ht('mgrSave','<div class="al aw">⚠ FDN received but Manager auto-save missing. FDN: <strong>'+fdn+'</strong></div>'); return; }
   try{
-    const r=await fetch(RELAY+'/api/efris/save-to-manager',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({managerEndpoint:ep,accessToken:tk,documentKey:DKEY,efrisData:{fdn,qrCode,antifakeCode}})});
+    const r=await fetch(RELAY+'/api/efris/save-to-manager',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({managerEndpoint:ep,accessToken:tk,documentKey:DKEY,efrisData:{fdn,qrCode,antifakeCode,deviceNo,issuedDate}})});
     const d=await r.json();
     ht('mgrSave',d.success?'<div class="st ss">✅ EFRIS data saved to Manager.io</div>':'<div class="al aw">⚠ FDN=<strong>'+fdn+'</strong> received but Manager save failed.<br>'+(d.error||'')+'</div>');
   }catch(e){ ht('mgrSave','<div class="al aw">⚠ FDN: <strong>'+fdn+'</strong> — note this down.</div>'); }
@@ -667,9 +688,38 @@ function showErr(msg){
   if(hint)ht('errHint','<div class="al ai">'+hint[1]+'</div>');else hd('errHint');
 }
 function retry(){hd('errCard');doSubmit();}
-function openVerify(){
-  const fdn=gvi('fdnQ');if(!fdn){alert('Enter an FDN first');return;}
-  window.open((CFG.sandbox?'https://efristest.ura.go.ug':'https://efris.ura.go.ug')+'/efrissite/receipts/verify?fdn='+encodeURIComponent(fdn),'_blank');
+
+async function doVerifyTin(){
+  const tin=gvi('tinQ'); if(!tin){ht('tinResult','<div class="al aw">Enter a TIN first</div>');return;}
+  if(!CFG.tin){ht('tinResult','<div class="al aw">Complete EFRIS setup in Settings first</div>');return;}
+  ht('tinResult','<div class="al ai">Querying URA EFRIS…</div>');
+  try{
+    const r=await fetch(RELAY+'/api/efris/verify-tin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({buyerTin:tin,config:{tin:CFG.tin,deviceNo:CFG.deviceNo,efrisPassword:CFG.efrisPassword,mode:CFG.sandbox?'sandbox':'production'}})});
+    const d=await r.json();
+    if(d.success){
+      const tp=d.taxpayer||{};
+      const name=tp.taxpayerName||tp.legalName||tp.name||tp.businessName||'';
+      const addr=tp.address||tp.businessAddress||'';
+      ht('tinResult','<div class="al as" style="font-size:12px;"><strong>✅ Valid TIN</strong><br><b>Name:</b> '+(name||'—')+'<br><b>TIN:</b> '+tin+(addr?'<br><b>Address:</b> '+addr:'')+'</div>');
+      sv('cTIN',tin);
+    } else {
+      ht('tinResult','<div class="al aw">❌ '+d.error+'</div>');
+    }
+  }catch(e){ht('tinResult','<div class="al aw">Network error: '+e.message+'</div>');}
+}
+
+async function doPreview(){
+  if(!INV){alert('Open an invoice first');return;}
+  const inv=buildInv();
+  try{
+    const r=await fetch(RELAY+'/api/efris/preview-invoice',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({invoice:inv,config:{tin:CFG.tin,deviceNo:CFG.deviceNo,vatRegistered:CFG.vatReg,businessName:CFG.legalName,tradeName:CFG.tradeName,businessAddress:CFG.address,brn:CFG.brn,phone:CFG.phone,email:CFG.email}})});
+    const d=await r.json();
+    if(!d.success){alert('Preview error: '+d.error);return;}
+    const p=d.payload;
+    const bi=p.basicInformation||{};
+    const lines=(p.goodsDetails||[]).map((g,i)=>'  '+(i+1)+'. '+g.item+' ('+g.itemCode+') × '+g.qty+' @ '+g.unitPrice+' = '+g.total+' ['+g.taxRule+']').join('\n');
+    alert('EFRIS T109 Preview\n\nDocument: '+(bi.invoiceKind==='1'?'Tax Invoice':'e-Receipt')+'\nCurrency: '+bi.currency+'\nPayment: '+(p.payWay&&p.payWay[0]?['Cash','Credit','Debit Card','Mobile Money','Cheque','Bank Transfer'][parseInt(p.payWay[0].paymentMode)-101]||p.payWay[0].paymentMode:'—')+'\n\nLines:\n'+lines+'\n\nGross: '+((p.summary||{}).grossAmount||'—')+'\nTax: '+((p.summary||{}).taxAmount||'—'));
+  }catch(e){alert('Preview error: '+e.message);}
 }
 
 // ══════════════════════════════════════════════════════════════

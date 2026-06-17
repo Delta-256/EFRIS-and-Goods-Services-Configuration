@@ -534,7 +534,7 @@ function buildT109(invoice, cfg) {
     goodsDetails,
     taxDetails,
     summary: { netAmount: r2(net), taxAmount: r2(taxAmount), grossAmount: r2(gross), itemCount: String(goodsDetails.length), modeCode: '1', remarks: invoice.Notes || '', qrCode: '' },
-    payWay: [{ paymentMode: '101', paymentAmount: r2(gross), orderNumber: '1' }],
+    payWay: [{ paymentMode: String(invoice.PaymentMode || '101'), paymentAmount: r2(gross), orderNumber: '1' }],
     extend: {}
   };
 }
@@ -1059,6 +1059,45 @@ app.post('/api/efris/submit-invoice', async (req, res) => {
   }
 });
 
+app.post('/api/efris/verify-tin', async (req, res) => {
+  const { buyerTin, config } = req.body || {};
+  if (!buyerTin || !config || !config.tin) return res.status(400).json({ success: false, error: 'buyerTin and config required' });
+  const eu = config.mode === 'production'
+    ? 'https://efrisws.ura.go.ug/ws/taapp/getInformation'
+    : 'https://efristest.ura.go.ug/efrisws/ws/taapp/getInformation';
+  try {
+    const session = await getSession(config.tin, config.deviceNo, config.efrisPassword, eu);
+    // T119: taxpayer query — look up a TIN to verify it exists and get details
+    const t119 = await efrisCall(eu, efrisEnvEnc('T119', { queryTin: buyerTin, queryType: '1' }, config.tin, config.deviceNo, session.aesKey, session.privatePem));
+    const rc = t119.data && t119.data.returnStateInfo ? t119.data.returnStateInfo.returnCode : null;
+    const rm = t119.data && t119.data.returnStateInfo ? t119.data.returnStateInfo.returnMessage : '';
+    let info = null;
+    if (t119.data && t119.data.data && t119.data.data.content) {
+      try {
+        const s = aesDecryptStr(t119.data.data.content, session.aesKey);
+        info = JSON.parse(s);
+      } catch(e) {}
+    }
+    const ok = rc === '00';
+    res.json(ok
+      ? { success: true, tin: buyerTin, taxpayer: info, returnCode: rc }
+      : { success: false, error: 'URA ' + rc + ': ' + rm, returnCode: rc });
+  } catch(e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.post('/api/efris/preview-invoice', async (req, res) => {
+  const { invoice, config } = req.body || {};
+  if (!invoice || !config) return res.status(400).json({ success: false, error: 'invoice and config required' });
+  try {
+    const t109data = buildT109(invoice, config);
+    res.json({ success: true, payload: t109data });
+  } catch(e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
 app.post('/api/efris/save-to-manager', async (req, res) => {
   const { managerEndpoint, accessToken, documentKey, efrisData } = req.body || {};
   if (!managerEndpoint || !accessToken || !documentKey) {
@@ -1079,16 +1118,15 @@ app.post('/api/efris/save-to-manager', async (req, res) => {
     const cf = await mgrTextCustomFields(ep, accessToken);
     form.CustomFields2 = form.CustomFields2 || {};
     form.CustomFields2.Strings = form.CustomFields2.Strings || {};
-    const setCF = (name, val) => { const k = cf.byName[name]; if (k && val != null && val !== '') form.CustomFields2.Strings[k] = String(val); };
     const setCFAny = (names, val) => { for (const n of names) { const k = cf.byName[n]; if (k && val != null && val !== '') { form.CustomFields2.Strings[k] = String(val); break; } } };
-    setCF('EFRIS FDN', efrisData.fdn);
-    setCF('EFRIS Antifake Code', efrisData.antifakeCode);
-    // QR Code field: store antifake code — Manager "QR Code" type renders it as QR image
-    setCFAny(['EFRIS QR Code URL', 'EFRIS QR Code'], efrisData.qrCode || efrisData.antifakeCode);
+    setCFAny(['Fiscal Document Number', 'EFRIS FDN'], efrisData.fdn);
+    setCFAny(['Verification Code', 'EFRIS Antifake Code'], efrisData.antifakeCode);
+    // QR Code field: store antifake code — Manager "QR Code" type renders it as QR image on printed docs
+    setCFAny(['QR Code', 'EFRIS QR Code URL', 'EFRIS QR Code'], efrisData.qrCode || efrisData.antifakeCode);
     setCFAny(['EFRIS Device Number', 'Device Number'], efrisData.deviceNo);
     setCFAny(['EFRIS Issued Time', 'Issued Time'], efrisData.issuedDate ? new Date(efrisData.issuedDate).toLocaleString('en-UG', { timeZone: 'Africa/Kampala' }) : '');
-    setCF('EFRIS Status', 'Submitted');
-    setCF('EFRIS Submission Date', new Date().toISOString().slice(0,10));
+    setCFAny(['Status', 'EFRIS Status'], 'Submitted');
+    setCFAny(['Submission Date', 'EFRIS Submission Date'], new Date().toISOString().slice(0,10));
     const postR = await managerCall(ep, accessToken, 'POST', formBase + '/' + key, form);
     const ok = postR.status === 200 || postR.status === 201 || postR.status === 204;
     res.json(ok ? { success: true } : { success: false, error: 'Manager POST returned ' + postR.status, fdn: efrisData.fdn });
