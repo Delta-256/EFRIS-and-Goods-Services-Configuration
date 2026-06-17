@@ -188,7 +188,14 @@ async function normalizeInvoice(ep, tk, key) {
       let it = null;
       try { it = (await managerCall(ep, tk, 'GET', '/non-inventory-item-form/' + l.Item)).data; } catch (e) {}
       if (!it || it.error) { try { it = (await managerCall(ep, tk, 'GET', '/inventory-item-form/' + l.Item)).data; } catch (e) {} }
-      if (it && !it.error) { itemName = it.Name || it.ItemName || itemName; code = it.Code || ''; unit = it.UnitName || unit; }
+      if (it && !it.error) {
+        itemName = it.Name || it.ItemName || itemName;
+        code = it.Code || it.code || '';
+        unit = it.UnitName || unit;
+        console.log(`   Line item resolved: name="${itemName}" code="${code}" (Manager Code field)`);
+      } else {
+        console.log(`   Line item ${l.Item}: could not resolve from Manager (no code)`);
+      }
     }
     let rate = 0, taxName = '';
     if (l.TaxCode) {
@@ -508,19 +515,24 @@ function buildT109(invoice, cfg) {
   const taxAmount = goodsDetails.reduce((s, g) => s + (parseFloat(g.tax) || 0), 0);
   const net = gross - taxAmount;
   const anyVat = goodsDetails.some(g => g.taxRate === '0.18');
-  const catCode = goodsDetails[0] ? goodsDetails[0]._catCode : (anyVat ? '01' : '05');
+  const catCode = goodsDetails[0] ? goodsDetails[0]._catCode : (anyVat ? '01' : '03');
   goodsDetails.forEach(g => delete g._catCode);
   const now = new Date();
   const d = invoice.IssueDate ? new Date(invoice.IssueDate) : now;
   const p = n => String(n).padStart(2, '0');
   const issuedDate = p(d.getDate()) + '/' + p(d.getMonth()+1) + '/' + d.getFullYear() + ' ' + p(now.getHours()) + ':' + p(now.getMinutes()) + ':' + p(now.getSeconds());
   const hasTin = !!(invoice.CustomerTIN && String(invoice.CustomerTIN).trim());
+  // Non-VAT e-receipts (invoiceKind=2): no tax categories apply — omit taxDetails
+  // entirely. The taxRule='OOS' on each goodsDetails line carries the designation.
+  const taxDetails = vat
+    ? [{ taxCategoryCode: catCode, netAmount: r2(net), taxRate: (goodsDetails[0] ? goodsDetails[0].taxRate : (anyVat ? '0.18' : '0')), taxAmount: r2(taxAmount), grossAmount: r2(gross) }]
+    : [];
   return {
     sellerDetails: { tin: cfg.tin, ninBrn: cfg.brn || '', legalName: cfg.businessName || cfg.tradeName || '', businessName: cfg.tradeName || cfg.businessName || '', address: cfg.businessAddress || 'Uganda', mobilePhone: cfg.phone || '', linePhone: '', emailAddress: cfg.email || '', placeOfBusiness: cfg.businessAddress || 'Uganda', referenceNo: invoice.Reference || '' },
     basicInformation: { invoiceNo: '', antifakeCode: '', deviceNo: cfg.deviceNo, issuedDate, operator: cfg.businessName || cfg.tradeName || 'system', currency: invoice.Currency || 'UGX', oriInvoiceId: '', invoiceType: '1', invoiceKind: vat ? '1' : '2', dataSource: '103', invoiceIndustryCode: '101', isBatch: '0' },
     buyerDetails: { buyerTin: hasTin ? String(invoice.CustomerTIN) : '', buyerNinBrn: '', buyerPassportNum: '', buyerLegalName: invoice.CustomerName || 'Walk-in Customer', buyerBusinessName: invoice.CustomerName || '', buyerAddress: invoice.CustomerAddress || '', buyerEmail: '', buyerMobilePhone: '', buyerLinePhone: '', buyerPlaceOfBusi: '', buyerType: hasTin ? '0' : '1', buyerCitizenship: '', buyerSector: '', buyerReferenceNo: '' },
     goodsDetails,
-    taxDetails: [{ taxCategoryCode: catCode, netAmount: r2(net), taxRate: (goodsDetails[0] ? goodsDetails[0].taxRate : (anyVat ? '0.18' : '0')), taxAmount: r2(taxAmount), grossAmount: r2(gross) }],
+    taxDetails,
     summary: { netAmount: r2(net), taxAmount: r2(taxAmount), grossAmount: r2(gross), itemCount: String(goodsDetails.length), modeCode: '1', remarks: invoice.Notes || '', qrCode: '' },
     payWay: [{ paymentMode: '101', paymentAmount: r2(gross), orderNumber: '1' }],
     extend: {}
@@ -995,9 +1007,23 @@ app.post('/api/efris/submit-invoice', async (req, res) => {
     ? 'https://efrisws.ura.go.ug/ws/taapp/getInformation'
     : 'https://efristest.ura.go.ug/efrisws/ws/taapp/getInformation';
   try {
+    // Guard: a receipt that clears an invoice has no goods lines — EFRIS can't
+    // process it. The original invoice should be submitted instead.
+    const lines = invoice.Lines || [];
+    if (lines.length === 0) {
+      return res.json({ success: false, error: 'This document has no line items. If this is a payment receipt that clears an invoice, submit the original sales invoice to EFRIS instead.' });
+    }
+    // Warn if any line is falling back to the auto-generated ITEM code (means the
+    // Manager item has no EFRIS product code set, and EFRIS will reject it as rc:41).
+    const t109data = buildT109(invoice, config);
+    const missingCodes = t109data.goodsDetails.filter(g => /^ITEM\d+$/.test(g.itemCode));
+    if (missingCodes.length) {
+      console.log(`   ⚠ T109: ${missingCodes.length} line(s) have auto-generated itemCode (no EFRIS product code on Manager item): ${missingCodes.map(g=>g.item).join(', ')}`);
+    }
+    t109data.goodsDetails.forEach(g => console.log(`   T109 line: item="${g.item}" itemCode="${g.itemCode}" taxRule="${g.taxRule}"`));
     const session = await getSession(config.tin, config.deviceNo, config.efrisPassword, eu);
     if (!session.aesKey) throw new Error('No AES key available to encrypt T109');
-    const t109 = await efrisCall(eu, efrisEnvEnc('T109', buildT109(invoice, config), config.tin, config.deviceNo, session.aesKey, session.privatePem));
+    const t109 = await efrisCall(eu, efrisEnvEnc('T109', t109data, config.tin, config.deviceNo, session.aesKey, session.privatePem));
     const rc = t109.data && t109.data.returnStateInfo ? t109.data.returnStateInfo.returnCode : null;
     const rm = t109.data && t109.data.returnStateInfo ? t109.data.returnStateInfo.returnMessage : '';
     let contentStr = null;
@@ -1006,10 +1032,27 @@ app.post('/api/efris/submit-invoice', async (req, res) => {
       catch(e) { try { contentStr = Buffer.from(t109.data.data.content, 'base64').toString('utf8'); } catch(_) {} }
     }
     let fdn = null, qrCode = null, antifakeCode = null;
-    try { if (contentStr) { const d = JSON.parse(contentStr); const bi = d.basicInformation || {}; fdn = d.fdn || d.fiscalDocumentNumber || bi.invoiceNo || bi.fdn; qrCode = d.qrCode || d.qrCodeBase64 || bi.qrCode; antifakeCode = d.antiFakeCode || d.antifakeCode || bi.antifakeCode; } } catch(e) {}
+    try {
+      if (contentStr) {
+        const d = JSON.parse(contentStr);
+        console.log(`   T109 response content keys: ${Object.keys(d).join(', ')}`);
+        console.log(`   T109 basicInformation: ${JSON.stringify(d.basicInformation || {})}`);
+        const bi = d.basicInformation || {};
+        fdn = d.fdn || d.fiscalDocumentNumber || bi.invoiceNo || bi.fdn;
+        antifakeCode = d.antiFakeCode || d.antifakeCode || bi.antifakeCode || bi.antiFakeCode;
+        const issuedDate = bi.issuedDate || bi.issueDate || d.issuedDate || '';
+        const deviceNo = bi.deviceNo || bi.deviceNumber || d.deviceNo || config.deviceNo || '';
+        qrCode = d.qrCode || d.qrCodeBase64 || bi.qrCode;
+        // Store antifakeCode as the QR content — Manager's "QR Code" type field
+        // renders whatever text is stored as a QR image on printed documents.
+        // A plain numeric string (no URL special chars) renders reliably.
+        if (!qrCode && antifakeCode) qrCode = antifakeCode;
+        console.log(`   T109 result — FDN: ${fdn}, antifakeCode: ${antifakeCode}, deviceNo: ${deviceNo}, issuedDate: ${issuedDate}, qrCode: ${qrCode}`);
+      }
+    } catch(e) { console.log(`   T109 content parse error: ${e.message}`); }
     const ok = rc === '00' || !!fdn;
     res.json(ok
-      ? { success: true, fdn, qrCode, antifakeCode, returnCode: rc, returnMessage: rm }
+      ? { success: true, fdn, qrCode, antifakeCode, deviceNo: config.deviceNo, issuedDate: new Date().toISOString(), returnCode: rc, returnMessage: rm }
       : { success: false, error: 'URA ' + rc + ': ' + rm, returnCode: rc });
   } catch(e) {
     res.status(500).json({ success: false, error: e.message });
@@ -1037,9 +1080,13 @@ app.post('/api/efris/save-to-manager', async (req, res) => {
     form.CustomFields2 = form.CustomFields2 || {};
     form.CustomFields2.Strings = form.CustomFields2.Strings || {};
     const setCF = (name, val) => { const k = cf.byName[name]; if (k && val != null && val !== '') form.CustomFields2.Strings[k] = String(val); };
+    const setCFAny = (names, val) => { for (const n of names) { const k = cf.byName[n]; if (k && val != null && val !== '') { form.CustomFields2.Strings[k] = String(val); break; } } };
     setCF('EFRIS FDN', efrisData.fdn);
     setCF('EFRIS Antifake Code', efrisData.antifakeCode);
-    setCF('EFRIS QR Code URL', efrisData.qrCode);
+    // QR Code field: store antifake code — Manager "QR Code" type renders it as QR image
+    setCFAny(['EFRIS QR Code URL', 'EFRIS QR Code'], efrisData.qrCode || efrisData.antifakeCode);
+    setCFAny(['EFRIS Device Number', 'Device Number'], efrisData.deviceNo);
+    setCFAny(['EFRIS Issued Time', 'Issued Time'], efrisData.issuedDate ? new Date(efrisData.issuedDate).toLocaleString('en-UG', { timeZone: 'Africa/Kampala' }) : '');
     setCF('EFRIS Status', 'Submitted');
     setCF('EFRIS Submission Date', new Date().toISOString().slice(0,10));
     const postR = await managerCall(ep, accessToken, 'POST', formBase + '/' + key, form);
