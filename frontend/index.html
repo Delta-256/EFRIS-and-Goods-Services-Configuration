@@ -601,8 +601,8 @@ async function loadList(){
     if(!d.success){ el.innerHTML='<div class="al aw">'+(d.error||'Failed to load')+'</div>'; return; }
     window.__invList=d.invoices||[];
     if(!window.__invList.length){ el.innerHTML='<div class="al ai">No sales invoices found.</div>'; return; }
-    var h='<div style="font-size:11px;color:var(--gray);margin:4px 0 8px;">'+(d.business||'')+' — tap an invoice:</div>';
-    window.__invList.forEach(function(i,idx){ h+='<div onclick="pick('+idx+')" style="cursor:pointer;border:1px solid var(--bdr);border-radius:6px;padding:8px 10px;margin-bottom:6px;background:white;"><strong>'+(i.reference||'(no ref)')+'</strong> — '+(i.customer||'')+'<br><span style="color:var(--gray);font-size:11px;">'+(i.currency||'')+' '+fn(i.amount)+' · '+fd(i.date)+'</span></div>'; });
+    var h='<div style="font-size:11px;color:var(--gray);margin:4px 0 8px;">'+(d.business||'')+' — tap an invoice or receipt:</div>';
+    window.__invList.forEach(function(i,idx){ var badge=i.docType==='receipt'?'<span class="pill pill-svc" style="margin-left:5px;">Receipt</span>':'<span class="pill pill-gds" style="margin-left:5px;">Invoice</span>'; h+='<div onclick="pick('+idx+')" style="cursor:pointer;border:1px solid var(--bdr);border-radius:6px;padding:8px 10px;margin-bottom:6px;background:white;"><strong>'+(i.reference||'(no ref)')+'</strong> — '+(i.customer||'')+badge+'<br><span style="color:var(--gray);font-size:11px;">'+(i.currency||'')+' '+fn(i.amount)+' · '+fd(i.date)+'</span></div>'; });
     el.innerHTML=h;
   }catch(e){ el.innerHTML='<div class="al aw">Network error: '+e.message+'</div>'; }
 }

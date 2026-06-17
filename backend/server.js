@@ -151,47 +151,63 @@ async function mgrTaxCodeGuid(ep, tk, vatType) {
 }
 
 async function normalizeInvoice(ep, tk, key) {
-  const formR = await managerCall(ep, tk, 'GET', '/sales-invoice-form/' + key);
-  if (formR.status !== 200) return { _error: 'Manager returned HTTP ' + formR.status, _status: formR.status };
-  const form = formR.data || {};
+  // A document key belongs to either a sales invoice or a receipt. Probe invoice
+  // first, fall back to receipt. (Non-VAT businesses often record cash sales as
+  // Manager "Receipts".)
+  let form = null, docType = 'invoice', formBase = '/sales-invoice-form', listBase = '/sales-invoices', listProp = 'salesInvoices';
+  let formR = await managerCall(ep, tk, 'GET', '/sales-invoice-form/' + key);
+  if (formR.status === 200 && formR.data && !formR.data.error && (formR.data.Lines || formR.data.Reference || formR.data.IssueDate)) {
+    form = formR.data;
+  } else {
+    // Try receipt
+    const rcptR = await managerCall(ep, tk, 'GET', '/receipt-form/' + key);
+    if (rcptR.status === 200 && rcptR.data && !rcptR.data.error) {
+      form = rcptR.data; docType = 'receipt'; formBase = '/receipt-form'; listBase = '/receipts'; listProp = 'receipts';
+      console.log(`   Loaded Manager RECEIPT ${key} — fields: ${Object.keys(form).join(', ')}`);
+    }
+  }
+  if (!form) return { _error: 'Manager returned HTTP ' + formR.status + ' (not found as invoice or receipt)', _status: formR.status };
   let disp = {};
   try {
-    const l = (await managerCall(ep, tk, 'GET', '/sales-invoices/' + key)).data;
-    disp = (l && l.salesInvoices && l.salesInvoices[0]) || {};
+    const l = (await managerCall(ep, tk, 'GET', listBase + '/' + key)).data;
+    disp = (l && l[listProp] && l[listProp][0]) || {};
   } catch (e) {}
   const cf = await mgrTextCustomFields(ep, tk);
   const strs = (form.CustomFields2 && form.CustomFields2.Strings) || {};
   const cfVals = {};
   Object.keys(strs).forEach(k => { cfVals[cf.byKey[k] || k] = strs[k]; });
-  let custName = disp.customer || '';
-  if (form.Customer) {
-    try { const c = (await managerCall(ep, tk, 'GET', '/customer-form/' + form.Customer)).data; if (c && c.Name) custName = c.Name; } catch (e) {}
+  let custName = disp.customer || disp.payer || '';
+  const contactKey = form.Customer || form.Payer || form.Contact;
+  if (contactKey) {
+    try { const c = (await managerCall(ep, tk, 'GET', '/customer-form/' + contactKey)).data; if (c && c.Name) custName = c.Name; } catch (e) {}
   }
   const lines = [];
   for (const l of (form.Lines || [])) {
-    let itemName = (l.LineDescription || '').split('\n')[0] || 'Service', code = '', unit = 'Each';
+    let itemName = (l.LineDescription || l.Description || '').split('\n')[0] || 'Service', code = '', unit = 'Each';
     if (l.Item) {
       let it = null;
       try { it = (await managerCall(ep, tk, 'GET', '/non-inventory-item-form/' + l.Item)).data; } catch (e) {}
       if (!it || it.error) { try { it = (await managerCall(ep, tk, 'GET', '/inventory-item-form/' + l.Item)).data; } catch (e) {} }
-      if (it && !it.error) { itemName = it.Name || itemName; code = it.Code || ''; unit = it.UnitName || unit; }
+      if (it && !it.error) { itemName = it.Name || it.ItemName || itemName; code = it.Code || ''; unit = it.UnitName || unit; }
     }
     let rate = 0, taxName = '';
     if (l.TaxCode) {
       try { const tc = (await managerCall(ep, tk, 'GET', '/tax-code-form/' + l.TaxCode)).data; if (tc) { rate = (tc.Rates && tc.Rates[0]) || 0; taxName = tc.Name || ''; } } catch (e) {}
     }
-    const qty = parseFloat(l.Qty || 1), price = parseFloat(l.SalesUnitPrice || 0);
+    const qty = parseFloat(l.Qty || l.Quantity || 1) || 1;
+    const price = parseFloat(l.SalesUnitPrice || l.UnitPrice || l.Amount || 0) || 0;
     const lineTotal = qty * price, taxAmount = lineTotal * (rate / 100);
     lines.push({ ItemName: itemName, ItemCode: code, Qty: qty, UnitPrice: price, LineTotal: lineTotal,
       TaxAmount: taxAmount, TaxRate: rate, TaxName: taxName, Unit: unit,
       EFRISCategoryId: '', EFRISCategoryName: '' });
   }
   const totalTax = lines.reduce((s, l) => s + l.TaxAmount, 0);
-  const total = (disp.invoiceAmount && disp.invoiceAmount.value) || lines.reduce((s, l) => s + l.LineTotal, 0);
-  const currency = (disp.invoiceAmount && disp.invoiceAmount.currency) || 'UGX';
+  const total = (disp.invoiceAmount && disp.invoiceAmount.value) || (disp.amount && disp.amount.value) || lines.reduce((s, l) => s + l.LineTotal, 0);
+  const currency = (disp.invoiceAmount && disp.invoiceAmount.currency) || (disp.amount && disp.amount.currency) || 'UGX';
   return {
+    DocType: docType,
     Reference: form.Reference || disp.reference || '',
-    IssueDate: (form.IssueDate || '').slice(0, 10) || disp.issueDate || '',
+    IssueDate: (form.IssueDate || form.Date || '').slice(0, 10) || disp.issueDate || disp.date || '',
     Customer: { Name: custName, Address: '', TIN: '' },
     CustomerName: custName, Currency: currency,
     ExchangeRate: form.ExchangeRate || 1, Total: total,
@@ -998,8 +1014,14 @@ app.post('/api/efris/save-to-manager', async (req, res) => {
   const ep = normEp(managerEndpoint);
   const key = bareKey(documentKey);
   try {
-    const getR = await managerCall(ep, accessToken, 'GET', '/sales-invoice-form/' + key, null);
-    if (getR.status !== 200) return res.json({ success: false, error: 'Manager GET returned ' + getR.status, hint: 'Token rejected or invoice key not found' });
+    // Write back to whichever document this key belongs to (invoice or receipt)
+    let formBase = '/sales-invoice-form';
+    let getR = await managerCall(ep, accessToken, 'GET', '/sales-invoice-form/' + key, null);
+    if (getR.status !== 200 || (getR.data && getR.data.error)) {
+      const rcptR = await managerCall(ep, accessToken, 'GET', '/receipt-form/' + key, null);
+      if (rcptR.status === 200 && rcptR.data && !rcptR.data.error) { getR = rcptR; formBase = '/receipt-form'; }
+    }
+    if (getR.status !== 200) return res.json({ success: false, error: 'Manager GET returned ' + getR.status, hint: 'Token rejected or document key not found' });
     const form = getR.data;
     const cf = await mgrTextCustomFields(ep, accessToken);
     form.CustomFields2 = form.CustomFields2 || {};
@@ -1010,7 +1032,7 @@ app.post('/api/efris/save-to-manager', async (req, res) => {
     setCF('EFRIS QR Code URL', efrisData.qrCode);
     setCF('EFRIS Status', 'Submitted');
     setCF('EFRIS Submission Date', new Date().toISOString().slice(0,10));
-    const postR = await managerCall(ep, accessToken, 'POST', '/sales-invoice-form/' + key, form);
+    const postR = await managerCall(ep, accessToken, 'POST', formBase + '/' + key, form);
     const ok = postR.status === 200 || postR.status === 201 || postR.status === 204;
     res.json(ok ? { success: true } : { success: false, error: 'Manager POST returned ' + postR.status, fdn: efrisData.fdn });
   } catch(e) {
@@ -1040,7 +1062,13 @@ app.get('/api/manager/invoices', async (req, res) => {
   try {
     const r = await managerCall(ep, tk, 'GET', '/sales-invoices', null);
     if (r.status !== 200) return res.json({ success: false, error: 'Manager returned HTTP ' + r.status, hint: r.status === 401 ? 'Token rejected' : 'Check endpoint URL' });
-    const list = ((r.data && r.data.salesInvoices) || []).map(i => ({ key: i.key, reference: i.reference, customer: i.customer, amount: (i.invoiceAmount && i.invoiceAmount.value) || 0, currency: (i.invoiceAmount && i.invoiceAmount.currency) || '', date: i.issueDate, status: i.status }));
+    const list = ((r.data && r.data.salesInvoices) || []).map(i => ({ key: i.key, reference: i.reference, customer: i.customer, amount: (i.invoiceAmount && i.invoiceAmount.value) || 0, currency: (i.invoiceAmount && i.invoiceAmount.currency) || '', date: i.issueDate, status: i.status, docType: 'invoice' }));
+    // Also include receipts (non-VAT cash sales). Tolerate absence / different shape.
+    try {
+      const rr = await managerCall(ep, tk, 'GET', '/receipts', null);
+      const rcpts = (rr.status === 200 && rr.data && (rr.data.receipts || rr.data.receiptsAndPayments)) || [];
+      rcpts.forEach(i => list.push({ key: i.key, reference: i.reference || i.payee || '(receipt)', customer: i.payer || i.customer || i.contact || '', amount: (i.amount && i.amount.value) || i.amount || 0, currency: (i.amount && i.amount.currency) || '', date: i.date || i.issueDate, status: i.status, docType: 'receipt' }));
+    } catch(_) {}
     res.json({ success: true, business: (r.data && r.data.business && r.data.business.name) || '', invoices: list });
   } catch(e) {
     res.json({ success: false, error: e.message });
