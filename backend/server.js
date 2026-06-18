@@ -226,11 +226,20 @@ async function normalizeInvoice(ep, tk, key) {
 }
 
 // ── RSA/AES crypto ────────────────────────────────────────────
-const EFRIS_PRIVATE_KEY_PATHS = process.env.EFRIS_PRIVATE_KEY
-  ? [process.env.EFRIS_PRIVATE_KEY]
+// EFRIS_PRIVATE_KEY env var can be either:
+//   - A file path (e.g. /secrets/efris_private.pem)
+//   - The raw PEM content (begins with -----BEGIN)
+const _pkEnv = process.env.EFRIS_PRIVATE_KEY || '';
+let _pemContentFromEnv = null;
+if (_pkEnv.trim().startsWith('-----BEGIN')) { _pemContentFromEnv = _pkEnv.replace(/\\n/g, '\n'); }
+const EFRIS_PRIVATE_KEY_PATHS = _pkEnv && !_pemContentFromEnv
+  ? [_pkEnv]
   : ['F:\\EFRIS_Keys\\efris_private_v2.pem', 'F:\\EFRIS_Keys\\efris_private.pem'];
 
-function loadPem(p) { try { return fs.readFileSync(p, 'utf8'); } catch(e) { return null; } }
+function loadPem(p) {
+  if (_pemContentFromEnv) return _pemContentFromEnv;
+  try { return fs.readFileSync(p, 'utf8'); } catch(e) { return null; }
+}
 
 function resolveAesKey(passwordDes) {
   const enc = Buffer.from(passwordDes, 'base64');
