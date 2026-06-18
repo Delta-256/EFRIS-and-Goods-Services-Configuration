@@ -220,10 +220,12 @@
       </div>
       <!-- B2G fields -->
       <div id="cust-b2g" class="cust-fields" style="display:none;">
-        <div class="g2 mt">
-          <div class="fg"><label>Government TIN</label><input id="cGovTIN" placeholder="Ministry TIN (if known)"/></div>
-          <div class="fg"><label>Ministry / Department *</label><input id="cGovDept" placeholder="e.g. Ministry of Tourism"/></div>
+        <div class="fg mt"><label>Government TIN <span style="font-weight:400;color:var(--gray);">(optional)</span></label>
+          <div style="display:flex;gap:6px;"><input id="cGovTIN" placeholder="Ministry TIN (if known)" style="flex:1;"/>
+          <button type="button" class="btn bo bsm" onclick="quickVerifyGovTin()" style="white-space:nowrap;">Verify &#128269;</button></div>
+          <div id="cGovTINResult" style="font-size:11px;margin-top:3px;"></div>
         </div>
+        <div class="fg"><label>Ministry / Department *</label><input id="cGovDept" placeholder="e.g. Ministry of Tourism"/></div>
       </div>
       <!-- Foreign fields -->
       <div id="cust-foreign" class="cust-fields" style="display:none;">
@@ -517,7 +519,7 @@
 'use strict';
 const RELAY = window.location.protocol + '//' + window.location.host;
 const SKEY = 'efris_v3';
-let CFG={}, INV=null, DKEY=null, MGR_EP=null, MGR_TK=null;
+let CFG={}, INV=null, DKEY=null, MGR_EP=null, MGR_TK=null, _lastInvKey=null;
 const TG={vatReg:false,sandbox:true,gRegEfris:false,efrisEnabled:true};
 let obStep=1;
 
@@ -625,7 +627,10 @@ window.addEventListener('message', evt=>{
   if(d.apiAccessToken){MGR_TK=d.apiAccessToken;if(!CFG.accessToken)CFG.accessToken=d.apiAccessToken;}
   var k=d.Key||d.documentKey||d.key||d.recordKey||'';
   if(k&&typeof k==='string'){var parts=k.split('?')[0].split('/').filter(Boolean);k=parts.length?parts[parts.length-1]:'';DKEY=k;}
-  if(DKEY)loadInv(DKEY);
+  // Only reload if the document key actually changed — Manager sends many postMessages
+  // for the same document (e.g. on every panel re-render), causing dozens of redundant
+  // invoice fetches. Guard with a last-loaded key so we fetch exactly once per document.
+  if(DKEY && DKEY !== _lastInvKey) loadInv(DKEY);
 });
 
 function readParams(){
@@ -639,6 +644,7 @@ function readParams(){
 
 async function loadInv(key){
   if(!key){showScr('sNone');return;}
+  _lastInvKey=key;
   const ep=CFG.managerEndpoint||MGR_EP, tk=CFG.accessToken||MGR_TK;
   if(!ep||!tk){showScr('sNone');return;}
   showScr('sLoad');
@@ -705,17 +711,18 @@ function setCustType(t){
   document.querySelectorAll('.cust-fields').forEach(d=>d.style.display='none');
   const el=$('cust-'+t); if(el) el.style.display='';
 }
-async function quickVerifyTin(){
-  const tin=gvi('cTIN'); if(!tin)return;
-  if(!CFG.tin){ht('cTINResult','<span style="color:#c62828;">Setup EFRIS in Settings first</span>');return;}
-  ht('cTINResult','<span style="color:var(--gray);">Verifying…</span>');
+async function _verifyTinInto(tin, resultId){
+  if(!CFG.tin){ht(resultId,'<span style="color:#c62828;">Setup EFRIS in Settings first</span>');return;}
+  ht(resultId,'<span style="color:var(--gray);">Verifying…</span>');
   try{
     const r=await fetch(RELAY+'/api/efris/verify-tin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({buyerTin:tin,config:{tin:CFG.tin,deviceNo:CFG.deviceNo,efrisPassword:CFG.efrisPassword,mode:CFG.sandbox?'sandbox':'production'}})});
     const d=await r.json();
-    if(d.success){const tp=d.taxpayer||{};const nm=tp.taxpayerName||tp.legalName||tp.name||'';ht('cTINResult','<span style="color:var(--g);">✅ '+(nm||'Valid TIN')+'</span>');}
-    else ht('cTINResult','<span style="color:#c62828;">❌ '+esc(d.error)+'</span>');
-  }catch(e){ht('cTINResult','<span style="color:#c62828;">Network error</span>');}
+    if(d.success){const tp=d.taxpayer||{};const nm=tp.taxpayerName||tp.legalName||tp.name||'';ht(resultId,'<span style="color:var(--g);">✅ '+(nm||'Valid TIN')+'</span>');}
+    else ht(resultId,'<span style="color:#c62828;">❌ '+esc(d.error)+'</span>');
+  }catch(e){ht(resultId,'<span style="color:#c62828;">Network error</span>');}
 }
+async function quickVerifyTin(){ const tin=gvi('cTIN'); if(!tin)return; await _verifyTinInto(tin,'cTINResult'); }
+async function quickVerifyGovTin(){ const tin=gvi('cGovTIN'); if(!tin)return; await _verifyTinInto(tin,'cGovTINResult'); }
 
 function buildInv(opts){
   opts=opts||{};
