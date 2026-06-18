@@ -238,7 +238,40 @@
       </div>
       <div id="subDone" class="hidden">
         <div class="al as">&#10003; Already submitted &mdash; FDN: <strong id="exFDN"></strong>
-          <button type="button" class="btn bo bsm" onclick="doCreditNote()" style="margin-left:10px;background:#c62828;color:#fff;border-color:#c62828;">&#8617; Issue Credit Note</button>
+          <button type="button" class="btn bo bsm" onclick="openCreditNoteModal()" style="margin-left:10px;background:#c62828;color:#fff;border-color:#c62828;">&#8617; Issue Credit Note</button>
+        </div>
+      </div>
+
+      <!-- Credit Note Modal -->
+      <div id="cnModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.45);z-index:999;overflow-y:auto;">
+        <div style="background:#fff;border-radius:10px;max-width:420px;margin:40px auto;padding:20px;box-shadow:0 4px 24px rgba(0,0,0,.3);">
+          <div style="font-weight:700;font-size:15px;margin-bottom:12px;color:#c62828;">&#8617; Issue Credit Note</div>
+          <div style="font-size:12px;color:var(--gray);margin-bottom:12px;">Original FDN: <strong id="cnOrigFDN"></strong></div>
+          <div class="fg">
+            <label>Reason for Credit Note *</label>
+            <select id="cnReasonCode" onchange="updateCnReason()" style="margin-bottom:6px;">
+              <option value="">— Select reason —</option>
+              <option value="Goods returned by customer">Goods returned by customer</option>
+              <option value="Overcharge on original invoice">Overcharge on original invoice</option>
+              <option value="Wrong item supplied">Wrong item supplied</option>
+              <option value="Invoice issued in error">Invoice issued in error</option>
+              <option value="Cancelled order">Cancelled order</option>
+              <option value="Partial cancellation">Partial cancellation</option>
+              <option value="Other">Other (specify below)</option>
+            </select>
+            <input id="cnReasonDetail" placeholder="Additional details or specify reason…" style="font-size:12px;"/>
+          </div>
+          <div class="fg" style="margin-top:8px;">
+            <label>Original Invoice Reference</label>
+            <input id="cnOrigRef" readonly style="background:#f9f9f9;color:var(--gray);font-size:12px;"/>
+          </div>
+          <div style="font-size:11px;color:#666;margin:8px 0;padding:8px;background:#fff8e1;border-radius:5px;border-left:3px solid #f9a825;">
+            This will create a credit note on URA EFRIS cancelling the original e-Receipt, and record it in Manager.io for the tax official to review.
+          </div>
+          <div style="display:flex;gap:8px;margin-top:12px;">
+            <button class="btn bo" style="flex:1;" onclick="closeCnModal()">Cancel</button>
+            <button class="btn" style="flex:2;background:#c62828;color:#fff;border-color:#c62828;" onclick="doCreditNote()">Issue Credit Note</button>
+          </div>
         </div>
       </div>
       <div class="fg mt">
@@ -775,7 +808,7 @@ function buildInv(opts){
     CustomerType:t, CustomerName:custName, CustomerTIN:custTIN, CustomerDept:custDept,
     PassportNum:passportNum, Nationality:nationality,
     CustomerAddress:(inv.Customer&&inv.Customer.Address)||'', Currency:inv.Currency||'UGX', ExchangeRate:fx,
-    IsRefund:opts.isRefund||false, OriginalFDN:opts.originalFDN||'',
+    IsRefund:opts.isRefund||false, OriginalFDN:opts.originalFDN||'', CreditNoteReason:opts.creditNoteReason||'',
     PayWays:getPayWays(),
     PaymentMode:(getPayWays()[0]||{}).mode||'101',
     Total:(inv.Total||0)*fx, AmountExcludingTax:(inv.AmountExcludingTax||0)*fx, TaxAmount:(inv.TaxAmount||0)*fx, Notes:inv.Notes||'',
@@ -805,7 +838,7 @@ async function doSubmit(){
     if(!d1.success)throw new Error(d1.error||'EFRIS submission failed');
     sh('rCard');tx('rFDN',d1.fdn||'—');tx('rAF',d1.antifakeCode||'—');
     steps[4].st='act';setProg(steps);
-    await saveMgr(d1.fdn,d1.qrCode,d1.antifakeCode,d1.deviceNo,d1.issuedDate);
+    await saveMgr(d1.fdn,d1.qrCode,d1.antifakeCode,d1.deviceNo,d1.issuedDate,d1.invoiceId);
     steps[4].st='don';setProg(steps);
   }catch(err){
     console.error(err); showErr(err.message);
@@ -814,14 +847,14 @@ async function doSubmit(){
   btn.disabled=false;btn.innerHTML='📤 Submit to URA EFRIS';
 }
 
-async function saveMgr(fdn,qrCode,antifakeCode,deviceNo,issuedDate){
+async function saveMgr(fdn,qrCode,antifakeCode,deviceNo,issuedDate,invoiceId){
   const ep=CFG.managerEndpoint||MGR_EP, tk=CFG.accessToken||MGR_TK;
-  if(!ep||!tk||!DKEY){ ht('mgrSave','<div class="al aw">⚠ FDN received but Manager auto-save missing. FDN: <strong>'+fdn+'</strong></div>'); return; }
+  if(!ep||!tk||!DKEY){ ht('mgrSave','<div class="al aw">&#9888; FDN received but Manager auto-save missing. FDN: <strong>'+fdn+'</strong></div>'); return; }
   try{
-    const r=await fetch(RELAY+'/api/efris/save-to-manager',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({managerEndpoint:ep,accessToken:tk,documentKey:DKEY,efrisData:{fdn,qrCode,antifakeCode,deviceNo,issuedDate}})});
+    const r=await fetch(RELAY+'/api/efris/save-to-manager',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({managerEndpoint:ep,accessToken:tk,documentKey:DKEY,efrisData:{fdn,qrCode,antifakeCode,deviceNo,issuedDate,invoiceId}})});
     const d=await r.json();
-    ht('mgrSave',d.success?'<div class="st ss">✅ EFRIS data saved to Manager.io</div>':'<div class="al aw">⚠ FDN=<strong>'+fdn+'</strong> received but Manager save failed.<br>'+(d.error||'')+'</div>');
-  }catch(e){ ht('mgrSave','<div class="al aw">⚠ FDN: <strong>'+fdn+'</strong> — note this down.</div>'); }
+    ht('mgrSave',d.success?'<div class="st ss">&#10003; EFRIS data saved to Manager.io</div>':'<div class="al aw">&#9888; FDN=<strong>'+fdn+'</strong> received but Manager save failed.<br>'+(d.error||'')+'</div>');
+  }catch(e){ ht('mgrSave','<div class="al aw">&#9888; FDN: <strong>'+fdn+'</strong> — note this down.</div>'); }
 }
 
 function showErr(msg){
@@ -833,29 +866,64 @@ function showErr(msg){
 }
 function retry(){hd('errCard');doSubmit();}
 
-async function doCreditNote(){
+// ── Credit Note ───────────────────────────────────────────────
+function openCreditNoteModal(){
   if(!INV){alert('No invoice loaded');return;}
   const fdn=$('exFDN')?$('exFDN').textContent.trim():'';
-  if(!fdn){alert('No FDN found for this invoice — it may not have been submitted yet');return;}
-  if(!confirm('Issue a CREDIT NOTE reversing FDN '+fdn+'?\n\nThis will cancel the original e-Receipt/Invoice on URA EFRIS.\n\nProceed?'))return;
+  if(!fdn){alert('No FDN found — this receipt has not been submitted to EFRIS yet');return;}
+  ht('cnOrigFDN',fdn);
+  sv('cnReasonCode',''); sv('cnReasonDetail','');
+  sv('cnOrigRef',INV.Reference||INV.Code||'');
+  $('cnModal').style.display='';
+}
+function closeCnModal(){ $('cnModal').style.display='none'; }
+function updateCnReason(){
+  const v=gvi('cnReasonCode');
+  if(v==='Other') $('cnReasonDetail').placeholder='Please describe the reason…';
+  else $('cnReasonDetail').placeholder='Additional details (optional)…';
+}
+async function doCreditNote(){
+  const fdn=$('exFDN')?$('exFDN').textContent.trim():'';
+  const reasonCode=gvi('cnReasonCode');
+  const reasonDetail=(gvi('cnReasonDetail')||'').trim();
+  if(!reasonCode){alert('Please select a reason for the credit note');return;}
+  const reason=reasonCode+(reasonDetail?' — '+reasonDetail:'');
+  closeCnModal();
   const btn=$('btnSub'); btn.disabled=true;
   hd('rCard');hd('errCard');
-  const steps=[{tx:'Connecting to EFRIS relay',st:'act'},{tx:'Authenticating with URA',st:'pnd'},{tx:'Building credit note payload',st:'pnd'},{tx:'Submitting credit note to URA',st:'pnd'},{tx:'Saving to Manager.io',st:'pnd'}];
+  const steps=[
+    {tx:'Submitting credit note to URA EFRIS',st:'act'},
+    {tx:'Creating credit note in Manager.io',st:'pnd'},
+    {tx:'Saving FDN to Manager.io',st:'pnd'}
+  ];
   setProg(steps);
   try{
-    steps[0].st='don';steps[1].st='act';setProg(steps);
-    const inv=buildInv({isRefund:true,originalFDN:fdn});
-    steps[1].st='don';steps[2].st='don';steps[3].st='act';setProg(steps);
+    // Step 1: Submit credit note to EFRIS
+    const inv=buildInv({isRefund:true,originalFDN:fdn,creditNoteReason:reason});
     const r1=await fetch(RELAY+'/api/efris/submit-invoice',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({invoice:inv,config:{tin:CFG.tin,deviceNo:CFG.deviceNo,efrisPassword:CFG.efrisPassword,mode:CFG.sandbox?'sandbox':'production',businessName:CFG.legalName,tradeName:CFG.tradeName,businessAddress:CFG.address,brn:CFG.brn,phone:CFG.phone,email:CFG.email,vatRegistered:CFG.vatReg}})});
     const d1=await r1.json();
-    steps[3].st=d1.success?'don':'err';setProg(steps);
     if(!d1.success)throw new Error(d1.error||'Credit note submission failed');
+    steps[0].st='don'; steps[1].st='act'; setProg(steps);
     sh('rCard');
-    ht('rFDN','<span style="color:#c62828;">↩ CREDIT NOTE</span> '+esc(d1.fdn||'—'));
+    ht('rFDN','<span style="color:#c62828;">&#8617; CREDIT NOTE</span> '+esc(d1.fdn||'—'));
     tx('rAF',d1.antifakeCode||'—');
-    steps[4].st='act';setProg(steps);
-    await saveMgr(d1.fdn,d1.qrCode,d1.antifakeCode,d1.deviceNo,d1.issuedDate);
-    steps[4].st='don';setProg(steps);
+    // Step 2: Create credit note record in Manager
+    const ep=CFG.managerEndpoint||MGR_EP, tk=CFG.accessToken||MGR_TK;
+    let cnKey=null;
+    if(ep&&tk&&DKEY){
+      try{
+        const cr=await fetch(RELAY+'/api/manager/create-credit-note',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({managerEndpoint:ep,accessToken:tk,originalKey:DKEY,reason,efrisFdn:d1.fdn,efrisInvoiceId:d1.invoiceId||''})});
+        const cd=await cr.json();
+        cnKey=cd.key;
+        if(cd.success) ht('mgrSave','<div class="st ss">&#10003; Credit note created in Manager (ref: CN-'+esc(INV.Reference||'')+')</div>');
+        else ht('mgrSave','<div class="al ai">&#9888; Manager credit note skipped: '+esc(cd.error||'unknown')+'</div>');
+      }catch(e){ ht('mgrSave','<div class="al ai">&#9888; Manager credit note: network error</div>'); }
+    }
+    steps[1].st='don'; steps[2].st='act'; setProg(steps);
+    // Step 3: Save FDN to the original invoice record in Manager (marks it as credit-noted)
+    await saveMgr(d1.fdn,d1.qrCode,d1.antifakeCode,d1.deviceNo,d1.issuedDate,d1.invoiceId||'');
+    steps[2].st='don'; setProg(steps);
   }catch(err){
     console.error(err);showErr('Credit Note: '+err.message);
     steps.forEach(s=>{if(s.st==='act')s.st='err';});setProg(steps);
@@ -1891,7 +1959,7 @@ async function doCreateReceipt(managerOnly){
     if(!sd.success) throw new Error('EFRIS: '+sd.error);
     steps[2].st='don'; steps[3].st='act'; prog();
     // Step 4: Save FDN
-    await saveMgr(sd.fdn,sd.qrCode,sd.antifakeCode,sd.deviceNo,sd.issuedDate);
+    await saveMgr(sd.fdn,sd.qrCode,sd.antifakeCode,sd.deviceNo,sd.issuedDate,sd.invoiceId||'');
     steps[3].st='don'; prog();
     renderInv(INV); showScr('sMain');
     sh('rCard'); tx('rFDN',sd.fdn||'—'); tx('rAF',sd.antifakeCode||'—');

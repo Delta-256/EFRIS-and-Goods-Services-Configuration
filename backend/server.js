@@ -560,7 +560,7 @@ function buildT109(invoice, cfg) {
     buyerDetails: { buyerTin, buyerNinBrn: '', buyerPassportNum, buyerLegalName, buyerBusinessName, buyerAddress, buyerEmail: invoice.CustomerEmail || '', buyerMobilePhone: invoice.CustomerPhone || '', buyerLinePhone: '', buyerPlaceOfBusi: invoice.CustomerDept || '', buyerType, buyerCitizenship, buyerSector: '', buyerReferenceNo: '' },
     goodsDetails,
     taxDetails,
-    summary: { netAmount: r2(net), taxAmount: r2(taxAmount), grossAmount: r2(gross), itemCount: String(goodsDetails.length), modeCode: '1', remarks: invoice.Notes || '', qrCode: '' },
+    summary: { netAmount: r2(net), taxAmount: r2(taxAmount), grossAmount: r2(gross), itemCount: String(goodsDetails.length), modeCode: '1', remarks: (isRefund && invoice.CreditNoteReason ? invoice.CreditNoteReason + (invoice.Notes ? '. ' + invoice.Notes : '') : invoice.Notes || ''), qrCode: '' },
     payWay: (invoice.PayWays && invoice.PayWays.length)
       ? invoice.PayWays.map((pw, i) => ({ paymentMode: String(pw.mode || '101'), paymentAmount: r2(pw.amount || 0), orderNumber: String(i + 1) }))
       : [{ paymentMode: String(invoice.PaymentMode || '101'), paymentAmount: r2(gross), orderNumber: '1' }],
@@ -1241,17 +1241,15 @@ app.post('/api/efris/submit-invoice', async (req, res) => {
         antifakeCode = d.antiFakeCode || d.antifakeCode || bi.antifakeCode || bi.antiFakeCode;
         const issuedDate = bi.issuedDate || bi.issueDate || d.issuedDate || '';
         const deviceNo = bi.deviceNo || bi.deviceNumber || d.deviceNo || config.deviceNo || '';
+        const invoiceId = bi.invoiceId || bi.invoiceID || d.invoiceId || '';
         qrCode = d.qrCode || d.qrCodeBase64 || bi.qrCode;
-        // Store antifakeCode as the QR content — Manager's "QR Code" type field
-        // renders whatever text is stored as a QR image on printed documents.
-        // A plain numeric string (no URL special chars) renders reliably.
         if (!qrCode && antifakeCode) qrCode = antifakeCode;
         console.log(`   T109 result — FDN: ${fdn}, antifakeCode: ${antifakeCode}, deviceNo: ${deviceNo}, issuedDate: ${issuedDate}, qrCode: ${qrCode}`);
       }
     } catch(e) { console.log(`   T109 content parse error: ${e.message}`); }
     const ok = rc === '00' || !!fdn;
     res.json(ok
-      ? { success: true, fdn, qrCode, antifakeCode, deviceNo: config.deviceNo, issuedDate: new Date().toISOString(), returnCode: rc, returnMessage: rm }
+      ? { success: true, fdn, qrCode, antifakeCode, deviceNo: config.deviceNo, issuedDate: new Date().toISOString(), invoiceId, returnCode: rc, returnMessage: rm }
       : { success: false, error: 'URA ' + rc + ': ' + rm, returnCode: rc });
   } catch(e) {
     res.status(500).json({ success: false, error: e.message });
@@ -1331,6 +1329,7 @@ app.post('/api/efris/save-to-manager', async (req, res) => {
     setCFAny(['QR Code', 'EFRIS QR Code URL', 'EFRIS QR Code'], efrisData.qrCode || efrisData.antifakeCode);
     setCFAny(['EFRIS Device Number', 'Device Number'], efrisData.deviceNo);
     setCFAny(['EFRIS Issued Time', 'Issued Time'], efrisData.issuedDate ? new Date(efrisData.issuedDate).toLocaleString('en-UG', { timeZone: 'Africa/Kampala' }) : '');
+    if (efrisData.invoiceId) setCFAny(['EFRIS Invoice ID', 'Invoice ID'], efrisData.invoiceId);
     setCFAny(['Status', 'EFRIS Status'], 'Submitted');
     setCFAny(['Submission Date', 'EFRIS Submission Date'], new Date().toISOString().slice(0,10));
     const postR = await managerCall(ep, accessToken, 'POST', formBase + '/' + key, form);
@@ -1338,6 +1337,100 @@ app.post('/api/efris/save-to-manager', async (req, res) => {
     res.json(ok ? { success: true } : { success: false, error: 'Manager POST returned ' + postR.status, fdn: efrisData.fdn });
   } catch(e) {
     res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// Create a credit note in Manager linked to the original invoice/receipt
+app.post('/api/manager/create-credit-note', async (req, res) => {
+  const { managerEndpoint, accessToken, originalKey, originalDocType, reason, efrisFdn, efrisInvoiceId } = req.body || {};
+  if (!managerEndpoint || !accessToken || !originalKey) return res.status(400).json({ success: false, error: 'Missing required fields' });
+  const ep = normEp(managerEndpoint);
+
+  // First read the original document to get its lines and details
+  let origForm = null, origFormBase = '/sales-invoice-form';
+  const invR = await managerCall(ep, accessToken, 'GET', '/sales-invoice-form/' + originalKey, null);
+  if (invR.status === 200 && invR.data && !invR.data.error) {
+    origForm = invR.data; origFormBase = '/sales-invoice-form';
+  } else {
+    const rcptR = await managerCall(ep, accessToken, 'GET', '/receipt-form/' + originalKey, null);
+    if (rcptR.status === 200 && rcptR.data && !rcptR.data.error) {
+      origForm = rcptR.data; origFormBase = '/receipt-form';
+    }
+  }
+  if (!origForm) return res.status(404).json({ success: false, error: 'Original document not found in Manager' });
+
+  // Try Manager's credit note form endpoints in order of likelihood
+  const cnPaths = ['/sales-credit-note-form', '/credit-note-form', '/debit-note-form'];
+  let tmpl = null, cnFormBase = null;
+  for (const path of cnPaths) {
+    try {
+      const r = await managerCall(ep, accessToken, 'GET', path, null);
+      if (r.status === 200 && r.data && !r.data.error) { tmpl = r.data; cnFormBase = path; break; }
+    } catch(_) {}
+  }
+
+  if (tmpl && cnFormBase) {
+    // Use Manager's native credit note form
+    const form = Object.assign({}, tmpl);
+    delete form.Key; delete form.key; delete form.id; delete form.UniqueName;
+    form.Date = new Date().toISOString().slice(0, 10);
+    form.Reference = 'CN-' + (origForm.Reference || origForm.InvoiceNumber || originalKey.slice(0, 8));
+    form.Description = reason + (efrisFdn ? ' | Original FDN: ' + efrisFdn : '');
+    // Link original document if field exists
+    if ('SalesInvoice' in tmpl) form.SalesInvoice = originalKey;
+    else if ('Receipt' in tmpl) form.Receipt = originalKey;
+    else if ('OriginalInvoice' in tmpl) form.OriginalInvoice = originalKey;
+    // Copy lines from original (negative qty = credit)
+    if (origForm.Lines) form.Lines = origForm.Lines;
+    // Copy customer
+    if (origForm.Customer) form.Customer = origForm.Customer;
+    else if (origForm.Contact) form.Contact = origForm.Contact;
+
+    const createR = await managerCall(ep, accessToken, 'POST', cnFormBase, form);
+    let newKey = null;
+    if (createR.data && createR.data.key) newKey = createR.data.key;
+    else if (createR.data && createR.data.Key) newKey = createR.data.Key;
+    console.log(`   Manager credit note created via ${cnFormBase} → key: ${newKey || 'unknown'}`);
+
+    // Save EFRIS FDN to the new credit note record if we got a key
+    if (newKey && efrisFdn) {
+      try {
+        const cfMeta = await mgrTextCustomFields(ep, accessToken);
+        const getCN = await managerCall(ep, accessToken, 'GET', cnFormBase + '/' + newKey, null);
+        if (getCN.status === 200 && getCN.data) {
+          const cnForm = getCN.data;
+          const setCF = (names, val) => {
+            const fk = cfMeta.find(f => names.some(n => (f.name||'').toLowerCase().includes(n.toLowerCase())));
+            if (fk) { if (!cnForm.CustomFields2) cnForm.CustomFields2 = { Strings: {} }; if (!cnForm.CustomFields2.Strings) cnForm.CustomFields2.Strings = {}; cnForm.CustomFields2.Strings[fk.key] = String(val); }
+          };
+          setCF(['Fiscal Document', 'FDN', 'EFRIS FDN'], efrisFdn);
+          setCF(['Status', 'EFRIS Status'], 'Credit Note');
+          await managerCall(ep, accessToken, 'POST', cnFormBase + '/' + newKey, cnForm);
+        }
+      } catch(_) {}
+    }
+    return res.json({ success: true, key: newKey, method: cnFormBase });
+  }
+
+  // Fallback: no native credit note form — create a negative receipt/invoice
+  console.log('   No credit note form found — creating negative receipt as fallback');
+  try {
+    const fallbackForm = Object.assign({}, origForm);
+    delete fallbackForm.Key; delete fallbackForm.key; delete fallbackForm.id; delete fallbackForm.UniqueName;
+    fallbackForm.Date = new Date().toISOString().slice(0, 10);
+    fallbackForm.Reference = 'CN-' + (origForm.Reference || '');
+    fallbackForm.Description = reason + (efrisFdn ? ' | Credit Note FDN: ' + efrisFdn : '');
+    if (fallbackForm.Lines) {
+      fallbackForm.Lines = fallbackForm.Lines.map(l => ({ ...l, Qty: -(parseFloat(l.Qty) || 1), UnitPrice: parseFloat(l.UnitPrice) || 0 }));
+    }
+    const fallR = await managerCall(ep, accessToken, 'POST', origFormBase, fallbackForm);
+    let newKey = null;
+    if (fallR.data && fallR.data.key) newKey = fallR.data.key;
+    else if (Array.isArray(fallR.data) && fallR.data.length) newKey = fallR.data[fallR.data.length - 1].key;
+    console.log(`   Fallback negative ${origFormBase} → key: ${newKey || 'unknown'}`);
+    return res.json({ success: true, key: newKey, method: origFormBase + ' (negative fallback)' });
+  } catch(e) {
+    return res.status(500).json({ success: false, error: e.message });
   }
 });
 
