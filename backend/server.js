@@ -903,6 +903,80 @@ app.get('/api/manager/divisions', async (req, res) => {
   }
 });
 
+// List all Manager items (inventory + non-inventory) for the create-receipt picker
+app.get('/api/manager/items-list', async (req, res) => {
+  const ep = normEp(req.query.ep || '');
+  const tk = req.query.tk || '';
+  if (!ep || !tk) return res.status(400).json({ success: false, error: 'ep and tk required' });
+  try {
+    const [invR, niR] = await Promise.all([
+      managerCall(ep, tk, 'GET', '/inventory-items', null),
+      managerCall(ep, tk, 'GET', '/non-inventory-items', null)
+    ]);
+    const inv = (invR.data && (invR.data.inventoryItems || [])).map(i => ({ key: i.key, code: i.code || i.Code || '', name: i.itemName || i.name || i.Name || '', type: 'inventory' }));
+    const ni  = (niR.data  && (niR.data.nonInventoryItems || [])).map(i => ({ key: i.key, code: i.code || i.Code || '', name: i.itemName || i.name || i.Name || '', type: 'service'  }));
+    res.json({ success: true, items: [...inv, ...ni] });
+  } catch(e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// Create a new receipt in Manager (then the frontend submits to EFRIS separately)
+app.post('/api/manager/create-receipt', async (req, res) => {
+  const { managerEndpoint, accessToken, receipt } = req.body || {};
+  if (!managerEndpoint || !accessToken) return res.status(400).json({ success: false, error: 'Missing Manager credentials' });
+  const ep = normEp(managerEndpoint);
+  try {
+    // GET blank form template so we have the correct shape (including hidden fields)
+    const tmplR = await managerCall(ep, accessToken, 'GET', '/receipt-form', null);
+    if (tmplR.status !== 200) {
+      return res.status(502).json({ success: false, error: `Manager receipt-form GET failed: HTTP ${tmplR.status}` });
+    }
+    const form = Object.assign({}, tmplR.data || {});
+    // Remove identity fields so Manager creates a new record
+    delete form.Key; delete form.key; delete form.id; delete form.UniqueName; delete form.NameWithCode;
+    // Populate
+    form.Date = receipt.date || new Date().toISOString().slice(0, 10);
+    if (receipt.reference) form.Reference = receipt.reference;
+    if (receipt.customer)   form.Customer   = receipt.customer;
+    if (receipt.receivedIn) form.ReceivedIn  = receipt.receivedIn;
+    if (receipt.description) form.Description = receipt.description;
+    form.QuantityColumn = true;
+    form.UnitPriceColumn = true;
+    form.HasLineDescription = true;
+    form.Lines = (receipt.lines || []).map(l => {
+      const line = { Qty: parseFloat(l.qty) || 1, UnitPrice: parseFloat(l.unitPrice) || 0 };
+      if (l.itemKey) line.Item = l.itemKey;
+      if (l.description) line.LineDescription = l.description;
+      return line;
+    });
+    const createR = await managerCall(ep, accessToken, 'POST', '/receipt-form', form);
+    if (createR.status < 200 || createR.status >= 300) {
+      return res.status(502).json({
+        success: false,
+        error: `Manager receipt creation failed: HTTP ${createR.status}`,
+        detail: JSON.stringify(createR.data || '').slice(0, 500),
+        formFields: Object.keys(form)
+      });
+    }
+    // Extract new key
+    let newKey = null;
+    const rd = createR.data;
+    if (rd && rd.key) newKey = rd.key;
+    else if (rd && rd.Key) newKey = rd.Key;
+    else if (Array.isArray(rd) && rd.length) {
+      const found = rd.find(r => (r.reference || r.Reference) === receipt.reference);
+      newKey = ((found || rd[rd.length - 1]).key);
+    }
+    if (!newKey && createR.headers) {
+      const loc = createR.headers['location'] || createR.headers['Location'] || '';
+      if (loc) { const parts = loc.split('/').filter(Boolean); newKey = parts[parts.length - 1]; }
+    }
+    console.log(`   Created Manager receipt → key: ${newKey || 'unknown'} ref: ${receipt.reference || ''}`);
+    res.json({ success: true, key: newKey, reference: receipt.reference });
+  } catch(e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
 app.post('/api/manager/inventory-adjust', async (req, res) => {
   const { managerEndpoint, accessToken, itemKey, qty, date, description } = req.body || {};
   if (!managerEndpoint || !accessToken || !itemKey) {
