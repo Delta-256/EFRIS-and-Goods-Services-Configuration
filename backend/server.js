@@ -1277,8 +1277,33 @@ app.post('/api/efris/submit-invoice', async (req, res) => {
       }
     } catch(e) { console.log(`   T109 content parse error: ${e.message}`); }
     const ok = rc === '00' || !!fdn;
+    const issuedDateNow = new Date().toISOString();
+    if (ok) {
+      try {
+        const logEntry = {
+          id: Date.now(),
+          submittedAt: issuedDateNow,
+          fdn,
+          antifakeCode,
+          validationUrl,
+          deviceNo: config.deviceNo,
+          invoiceId,
+          returnCode: rc,
+          customerName: invoice.basicInformation && invoice.basicInformation.buyerDetails
+            ? invoice.basicInformation.buyerDetails.buyerTin || ''
+            : '',
+          totalAmount: invoice.goodsDetails
+            ? invoice.goodsDetails.reduce((s, g) => s + (parseFloat(g.totalAmount) || 0), 0)
+            : 0,
+          currency: invoice.basicInformation && invoice.basicInformation.currency || 'UGX',
+          invoiceKind: invoice.basicInformation && invoice.basicInformation.invoiceKind || '',
+          mode: config.mode || 'sandbox',
+        };
+        appendSubmissionLog(logEntry);
+      } catch(le) { console.log('Submission log write error:', le.message); }
+    }
     res.json(ok
-      ? { success: true, fdn, qrCode, antifakeCode, validationUrl, deviceNo: config.deviceNo, issuedDate: new Date().toISOString(), invoiceId, returnCode: rc, returnMessage: rm }
+      ? { success: true, fdn, qrCode, antifakeCode, validationUrl, deviceNo: config.deviceNo, issuedDate: issuedDateNow, invoiceId, returnCode: rc, returnMessage: rm }
       : { success: false, error: 'URA ' + rc + ': ' + rm, returnCode: rc });
   } catch(e) {
     res.status(500).json({ success: false, error: e.message });
@@ -1592,6 +1617,53 @@ app.post('/api/efris/search-goods', async (req, res) => {
   }
 });
 
+
+// ══════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════
+//  Submission Log
+// ══════════════════════════════════════════════════════════════
+const SUBMISSION_LOG_FILE = path.join(DATA_DIR, 'submission_log.json');
+
+function appendSubmissionLog(entry) {
+  let log = [];
+  try { log = JSON.parse(fs.readFileSync(SUBMISSION_LOG_FILE, 'utf8')); } catch(e) {}
+  log.unshift(entry); // newest first
+  if (log.length > 1000) log = log.slice(0, 1000); // cap at 1000 entries
+  fs.writeFileSync(SUBMISSION_LOG_FILE, JSON.stringify(log, null, 2));
+}
+
+app.get('/api/submission-log', (req, res) => {
+  try {
+    let log = [];
+    try { log = JSON.parse(fs.readFileSync(SUBMISSION_LOG_FILE, 'utf8')); } catch(e) {}
+    const page = parseInt(req.query.page) || 1;
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    const q = (req.query.q || '').toLowerCase();
+    const filtered = q ? log.filter(e =>
+      (e.fdn || '').toLowerCase().includes(q) ||
+      (e.invoiceId || '').toLowerCase().includes(q) ||
+      (e.customerName || '').toLowerCase().includes(q)
+    ) : log;
+    const total = filtered.length;
+    const items = filtered.slice((page - 1) * limit, page * limit);
+    res.json({ success: true, total, page, limit, items });
+  } catch(e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.delete('/api/submission-log/:id', (req, res) => {
+  try {
+    let log = [];
+    try { log = JSON.parse(fs.readFileSync(SUBMISSION_LOG_FILE, 'utf8')); } catch(e) {}
+    const id = parseInt(req.params.id);
+    log = log.filter(e => e.id !== id);
+    fs.writeFileSync(SUBMISSION_LOG_FILE, JSON.stringify(log, null, 2));
+    res.json({ success: true });
+  } catch(e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
 
 // ══════════════════════════════════════════════════════════════
 //  Document Number Series
