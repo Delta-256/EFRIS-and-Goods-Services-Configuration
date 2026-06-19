@@ -1558,7 +1558,7 @@ app.post('/api/efris/search-goods', async (req, res) => {
   if (!tin || !deviceNo || !efrisPassword) return res.json({ success: false, error: 'Missing EFRIS credentials' });
   try {
     const eu = mode === 'sandbox' ? 'https://efristest.ura.go.ug/efrisws/ws/taapp' : 'https://efris.ura.go.ug/efrisws/ws/taapp';
-    const session = await getSession(eu, tin, deviceNo, efrisPassword);
+    const session = await getSession(tin, deviceNo, efrisPassword, eu);
     const payload = { goodsName: query || '', goodsCode: '', pageNo: '1', pageSize: '20' };
     const t131 = await efrisCall(eu, efrisEnvEnc('T131', payload, tin, deviceNo, session.aesKey, session.privatePem));
     const outerRc = t131.data?.returnStateInfo?.returnCode;
@@ -1573,7 +1573,8 @@ app.post('/api/efris/search-goods', async (req, res) => {
     }
     res.json({ success: true, items });
   } catch (e) {
-    res.json({ success: false, error: e.message });
+    const safe = e.message.replace(efrisPassword || '', '***');
+    res.json({ success: false, error: safe });
   }
 });
 
