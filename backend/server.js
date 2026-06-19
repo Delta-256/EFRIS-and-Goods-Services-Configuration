@@ -1325,7 +1325,7 @@ app.post('/api/efris/preview-invoice', async (req, res) => {
 });
 
 app.post('/api/efris/save-to-manager', async (req, res) => {
-  const { managerEndpoint, accessToken, documentKey, efrisData } = req.body || {};
+  const { managerEndpoint, accessToken, documentKey, efrisData, vatRegistered } = req.body || {};
   if (!managerEndpoint || !accessToken || !documentKey) {
     return res.status(400).json({ success: false, error: 'Missing required fields' });
   }
@@ -1354,6 +1354,11 @@ app.post('/api/efris/save-to-manager', async (req, res) => {
     if (efrisData.invoiceId) setCFAny(['EFRIS Invoice ID', 'Invoice ID'], efrisData.invoiceId);
     setCFAny(['Status', 'EFRIS Status'], 'Submitted');
     setCFAny(['Submission Date', 'EFRIS Submission Date'], new Date().toISOString().slice(0,10));
+    // Set Manager custom title to EFRIS document type (e-Receipt or Tax Invoice)
+    const docTypeLabel = vatRegistered ? 'Tax Invoice' : 'e-Receipt';
+    if ('CustomTitle' in form || form.CustomTitle === undefined) {
+      form.CustomTitle = docTypeLabel;
+    }
     const postR = await managerCall(ep, accessToken, 'POST', formBase + '/' + key, form);
     const ok = postR.status === 200 || postR.status === 201 || postR.status === 204;
     res.json(ok ? { success: true } : { success: false, error: 'Manager POST returned ' + postR.status, fdn: efrisData.fdn });

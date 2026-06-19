@@ -305,7 +305,7 @@
       <div id="subProg"></div>
     </div>
     <div class="rcard hidden" id="rCard">
-      <h4>&#10003; Successfully submitted to URA EFRIS</h4>
+      <h4 id="rCardTitle">&#10003; Successfully submitted to URA EFRIS</h4>
       <div style="font-size:10px;text-transform:uppercase;color:var(--txtl);letter-spacing:.4px;">Fiscal Document Number (FDN)</div>
       <div class="fdn" id="rFDN"></div>
       <div style="font-size:11px;margin-top:4px;">Antifake Code: <strong id="rAF">&mdash;</strong></div>
@@ -890,6 +890,8 @@ async function doSubmit(){
     if(!d1.success)throw new Error(d1.error||'EFRIS submission failed');
     sh('rCard');tx('rFDN',d1.fdn||'—');tx('rAF',d1.antifakeCode||'—');
     ht('rQR',d1.qrCode?'<img src="'+esc(d1.qrCode)+'" alt="QR Code" style="width:100px;height:100px;margin-top:4px;" onerror="this.style.display=\'none\'"/>':'');
+    const _docLabel=CFG.vatReg?'Tax Invoice':'e-Receipt';
+    ht('rCardTitle','&#10003; '+_docLabel+' issued — submitted to URA EFRIS');
     steps[4].st='act';setProg(steps);
     await saveMgr(d1.fdn,d1.qrCode,d1.antifakeCode,d1.deviceNo,d1.issuedDate,d1.invoiceId);
     steps[4].st='don';setProg(steps);
@@ -904,7 +906,7 @@ async function saveMgr(fdn,qrCode,antifakeCode,deviceNo,issuedDate,invoiceId){
   const ep=CFG.managerEndpoint||MGR_EP, tk=CFG.accessToken||MGR_TK;
   if(!ep||!tk||!DKEY){ ht('mgrSave','<div class="al aw">&#9888; FDN received but Manager auto-save missing. FDN: <strong>'+fdn+'</strong></div>'); return; }
   try{
-    const r=await fetch(RELAY+'/api/efris/save-to-manager',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({managerEndpoint:ep,accessToken:tk,documentKey:DKEY,efrisData:{fdn,qrCode,antifakeCode,deviceNo,issuedDate,invoiceId}})});
+    const r=await fetch(RELAY+'/api/efris/save-to-manager',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({managerEndpoint:ep,accessToken:tk,documentKey:DKEY,vatRegistered:!!(CFG.vatReg),efrisData:{fdn,qrCode,antifakeCode,deviceNo,issuedDate,invoiceId}})});
     const d=await r.json();
     ht('mgrSave',d.success?'<div class="st ss">&#10003; EFRIS data saved to Manager.io</div>':'<div class="al aw">&#9888; FDN=<strong>'+fdn+'</strong> received but Manager save failed.<br>'+(d.error||'')+'</div>');
   }catch(e){ ht('mgrSave','<div class="al aw">&#9888; FDN: <strong>'+fdn+'</strong> — note this down.</div>'); }
