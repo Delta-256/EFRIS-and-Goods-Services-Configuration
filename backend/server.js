@@ -209,7 +209,9 @@ async function normalizeInvoice(ep, tk, key) {
       EFRISCategoryId: '', EFRISCategoryName: '' });
   }
   const totalTax = lines.reduce((s, l) => s + l.TaxAmount, 0);
-  const total = (disp.invoiceAmount && disp.invoiceAmount.value) || (disp.amount && disp.amount.value) || lines.reduce((s, l) => s + l.LineTotal, 0);
+  // Always compute total from line items when we have them — Manager's stored display total can be stale
+  const computedFromLines = lines.length > 0 ? lines.reduce((s, l) => s + l.LineTotal, 0) : 0;
+  const total = computedFromLines || (disp.invoiceAmount && disp.invoiceAmount.value) || (disp.amount && disp.amount.value) || 0;
   const currency = (disp.invoiceAmount && disp.invoiceAmount.currency) || (disp.amount && disp.amount.currency) || 'UGX';
   return {
     DocType: docType,
@@ -224,11 +226,20 @@ async function normalizeInvoice(ep, tk, key) {
 }
 
 // ── RSA/AES crypto ────────────────────────────────────────────
-const EFRIS_PRIVATE_KEY_PATHS = process.env.EFRIS_PRIVATE_KEY
-  ? [process.env.EFRIS_PRIVATE_KEY]
+// EFRIS_PRIVATE_KEY env var can be either:
+//   - A file path (e.g. /secrets/efris_private.pem)
+//   - The raw PEM content (begins with -----BEGIN)
+const _pkEnv = process.env.EFRIS_PRIVATE_KEY || '';
+let _pemContentFromEnv = null;
+if (_pkEnv.trim().startsWith('-----BEGIN')) { _pemContentFromEnv = _pkEnv.replace(/\\n/g, '\n'); }
+const EFRIS_PRIVATE_KEY_PATHS = _pkEnv && !_pemContentFromEnv
+  ? [_pkEnv]
   : ['F:\\EFRIS_Keys\\efris_private_v2.pem', 'F:\\EFRIS_Keys\\efris_private.pem'];
 
-function loadPem(p) { try { return fs.readFileSync(p, 'utf8'); } catch(e) { return null; } }
+function loadPem(p) {
+  if (_pemContentFromEnv) return _pemContentFromEnv;
+  try { return fs.readFileSync(p, 'utf8'); } catch(e) { return null; }
+}
 
 function resolveAesKey(passwordDes) {
   const enc = Buffer.from(passwordDes, 'base64');
@@ -473,6 +484,7 @@ async function isValidEfrisUnit(code, tin, deviceNo, session, eu) {
 
 function buildT109(invoice, cfg) {
   const vat = !!cfg.vatRegistered;
+  const isRefund = !!(invoice.IsRefund || invoice.isRefund);
   const r2 = n => (Math.round((parseFloat(n) || 0) * 100) / 100).toFixed(2);
   const lines = invoice.Lines || [];
   const goodsDetails = lines.map((l, i) => {
@@ -511,7 +523,7 @@ function buildT109(invoice, cfg) {
       vatApplicableFlag: vatFlag, _catCode: catCode
     };
   });
-  const gross = parseFloat(invoice.Total || 0) || goodsDetails.reduce((s, g) => s + parseFloat(g.total), 0);
+  const gross = goodsDetails.reduce((s, g) => s + parseFloat(g.total), 0);
   const taxAmount = goodsDetails.reduce((s, g) => s + (parseFloat(g.tax) || 0), 0);
   const net = gross - taxAmount;
   const anyVat = goodsDetails.some(g => g.taxRate === '0.18');
@@ -521,20 +533,48 @@ function buildT109(invoice, cfg) {
   const d = invoice.IssueDate ? new Date(invoice.IssueDate) : now;
   const p = n => String(n).padStart(2, '0');
   const issuedDate = p(d.getDate()) + '/' + p(d.getMonth()+1) + '/' + d.getFullYear() + ' ' + p(now.getHours()) + ':' + p(now.getMinutes()) + ':' + p(now.getSeconds());
+
+  // ── Buyer details — supports B2C, B2B, B2G, Foreign ──────────────────────
+  // buyerType: '0'=Taxpayer(B2B/B2G with TIN), '1'=Citizen(B2C), '2'=Foreigner
+  const custType = String(invoice.CustomerType || 'b2c').toLowerCase();
   const hasTin = !!(invoice.CustomerTIN && String(invoice.CustomerTIN).trim());
+  let buyerType, buyerTin, buyerPassportNum, buyerCitizenship, buyerLegalName, buyerBusinessName, buyerAddress;
+  if (custType === 'b2b') {
+    buyerType = '0'; buyerTin = String(invoice.CustomerTIN || ''); buyerPassportNum = '';
+    buyerCitizenship = ''; buyerLegalName = invoice.CustomerName || '';
+    buyerBusinessName = invoice.CustomerName || ''; buyerAddress = invoice.CustomerAddress || '';
+  } else if (custType === 'b2g') {
+    buyerType = '0'; buyerTin = String(invoice.CustomerTIN || ''); buyerPassportNum = '';
+    buyerCitizenship = ''; buyerLegalName = invoice.CustomerName || 'Government Entity';
+    buyerBusinessName = invoice.CustomerDept || invoice.CustomerName || 'Government';
+    buyerAddress = invoice.CustomerAddress || '';
+  } else if (custType === 'foreign') {
+    buyerType = '2'; buyerTin = ''; buyerPassportNum = String(invoice.PassportNum || '');
+    buyerCitizenship = String(invoice.Nationality || '');
+    buyerLegalName = invoice.CustomerName || 'Foreign Visitor';
+    buyerBusinessName = invoice.CustomerName || ''; buyerAddress = invoice.CustomerAddress || '';
+  } else {
+    // B2C default — walk-in local customer
+    buyerType = '1'; buyerTin = ''; buyerPassportNum = '';
+    buyerCitizenship = ''; buyerLegalName = invoice.CustomerName || 'Walk-in Customer';
+    buyerBusinessName = invoice.CustomerName || ''; buyerAddress = '';
+  }
+
   // Non-VAT e-receipts (invoiceKind=2): no tax categories apply — omit taxDetails
   // entirely. The taxRule='OOS' on each goodsDetails line carries the designation.
   const taxDetails = vat
     ? [{ taxCategoryCode: catCode, netAmount: r2(net), taxRate: (goodsDetails[0] ? goodsDetails[0].taxRate : (anyVat ? '0.18' : '0')), taxAmount: r2(taxAmount), grossAmount: r2(gross) }]
     : [];
   return {
-    sellerDetails: { tin: cfg.tin, ninBrn: cfg.brn || '', legalName: cfg.businessName || cfg.tradeName || '', businessName: cfg.tradeName || cfg.businessName || '', address: cfg.businessAddress || 'Uganda', mobilePhone: cfg.phone || '', linePhone: '', emailAddress: cfg.email || '', placeOfBusiness: cfg.businessAddress || 'Uganda', referenceNo: invoice.Reference || '' },
-    basicInformation: { invoiceNo: '', antifakeCode: '', deviceNo: cfg.deviceNo, issuedDate, operator: cfg.businessName || cfg.tradeName || 'system', currency: invoice.Currency || 'UGX', oriInvoiceId: '', invoiceType: '1', invoiceKind: vat ? '1' : '2', dataSource: '103', invoiceIndustryCode: '101', isBatch: '0' },
-    buyerDetails: { buyerTin: hasTin ? String(invoice.CustomerTIN) : '', buyerNinBrn: '', buyerPassportNum: '', buyerLegalName: invoice.CustomerName || 'Walk-in Customer', buyerBusinessName: invoice.CustomerName || '', buyerAddress: invoice.CustomerAddress || '', buyerEmail: '', buyerMobilePhone: '', buyerLinePhone: '', buyerPlaceOfBusi: '', buyerType: hasTin ? '0' : '1', buyerCitizenship: '', buyerSector: '', buyerReferenceNo: '' },
+    sellerDetails: { tin: cfg.tin, ninBrn: cfg.brn || '', legalName: cfg.businessName || cfg.tradeName || '', businessName: cfg.tradeName || cfg.businessName || '', address: cfg.businessAddress || 'Uganda', mobilePhone: cfg.phone || '', linePhone: '', emailAddress: cfg.email || '', placeOfBusiness: cfg.businessAddress || 'Uganda', referenceNo: (isRefund ? 'CN-' : '') + (invoice.Reference || '') },
+    basicInformation: { invoiceNo: '', antifakeCode: '', deviceNo: cfg.deviceNo, issuedDate, operator: cfg.businessName || cfg.tradeName || 'system', currency: invoice.Currency || 'UGX', oriInvoiceId: invoice.OriginalFDN || '', invoiceType: '1', invoiceKind: vat ? '1' : '2', dataSource: '103', invoiceIndustryCode: '101', isBatch: '0', isRefund: isRefund ? '1' : '0' },
+    buyerDetails: { buyerTin, buyerNinBrn: '', buyerPassportNum, buyerLegalName, buyerBusinessName, buyerAddress, buyerEmail: invoice.CustomerEmail || '', buyerMobilePhone: invoice.CustomerPhone || '', buyerLinePhone: '', buyerPlaceOfBusi: invoice.CustomerDept || '', buyerType, buyerCitizenship, buyerSector: '', buyerReferenceNo: '' },
     goodsDetails,
     taxDetails,
-    summary: { netAmount: r2(net), taxAmount: r2(taxAmount), grossAmount: r2(gross), itemCount: String(goodsDetails.length), modeCode: '1', remarks: invoice.Notes || '', qrCode: '' },
-    payWay: [{ paymentMode: '101', paymentAmount: r2(gross), orderNumber: '1' }],
+    summary: { netAmount: r2(net), taxAmount: r2(taxAmount), grossAmount: r2(gross), itemCount: String(goodsDetails.length), modeCode: '1', remarks: (isRefund && invoice.CreditNoteReason ? invoice.CreditNoteReason + (invoice.Notes ? '. ' + invoice.Notes : '') : invoice.Notes || ''), qrCode: '' },
+    payWay: (invoice.PayWays && invoice.PayWays.length)
+      ? invoice.PayWays.map((pw, i) => ({ paymentMode: String(pw.mode || '101'), paymentAmount: r2(pw.amount || 0), orderNumber: String(i + 1) }))
+      : [{ paymentMode: String(invoice.PaymentMode || '101'), paymentAmount: r2(gross), orderNumber: '1' }],
     extend: {}
   };
 }
@@ -730,6 +770,11 @@ app.post('/api/goods/sync-to-manager', async (req, res) => {
       if (comCodeFieldKey && item.comCode) cfStrings[comCodeFieldKey] = item.comCode;
       if (catPathFieldKey && catPath)      cfStrings[catPathFieldKey] = catPath;
       if (Object.keys(cfStrings).length)   form.CustomFields2 = { Strings: cfStrings };
+      if (item.whenSold) form.WhenSold = item.whenSold;
+      if (item.whenPurchased) form.WhenPurchased = item.whenPurchased;
+      if (item.division) form.Division = item.division;
+      if (item.salesDivision) form.SalesDivision = item.salesDivision;
+      if (!isService && item.costMethod != null && item.costMethod !== '') form.CostMethod = item.costMethod;
       r = await managerCall(ep, accessToken, 'POST', `${formBase}/${existingKey}`, form);
       action = 'updated';
       const written = Object.keys(cfStrings).length;
@@ -742,16 +787,22 @@ app.post('/api/goods/sync-to-manager', async (req, res) => {
         : { success: false, error: `Manager form POST returned HTTP ${r.status}: ${JSON.stringify(r.data||'').slice(0,200)}` });
 
     } else {
-      // Step 2b: CREATE — POST to the list endpoint (standard creation path)
-      console.log(`   No existing item found — creating via POST ${listPath}`);
+      // Step 2b: CREATE — use the form endpoint (POST without a key) for both
+      // inventory and non-inventory items. POST to the list endpoint works for
+      // non-inventory items but silently fails for inventory items in Manager v2.
+      const createPath = isService ? '/non-inventory-item-form' : '/inventory-item-form';
+      console.log(`   No existing item found — creating via POST ${createPath}`);
       const cfStrings = {};
       if (comCodeFieldKey && item.comCode) cfStrings[comCodeFieldKey] = item.comCode;
       if (catPathFieldKey && catPath)      cfStrings[catPathFieldKey] = catPath;
       const price = parseFloat(item.price) || 0;
       const payload = { Code: item.code, Name: item.name, UnitName: item.uom, DefaultLineDescription: item.remarks || '' };
       if (isService) {
+        payload.HasDefaultLineDescription = !!(item.remarks);
         payload.HasSalesUnitPrice = price > 0;
+        payload.HasDefaultSalesUnitPrice = price > 0;
         payload.SalesUnitPrice    = price;
+        payload.DefaultSalesUnitPrice = price;
       } else {
         payload.ItemName                 = item.name;
         payload.DefaultSalesUnitPrice    = price;
@@ -761,20 +812,32 @@ app.post('/api/goods/sync-to-manager', async (req, res) => {
       if (item.vat) {
         try { const tg = await mgrTaxCodeGuid(ep, accessToken, item.vat); if (tg) payload.TaxCode = tg; } catch(_) {}
       }
+      if (item.whenSold) payload.WhenSold = item.whenSold;
+      if (item.whenPurchased) payload.WhenPurchased = item.whenPurchased;
+      if (item.division) payload.Division = item.division;
+      if (item.salesDivision) payload.SalesDivision = item.salesDivision;
+      if (!isService && item.costMethod != null && item.costMethod !== '') payload.CostMethod = item.costMethod;
       if (Object.keys(cfStrings).length) payload.CustomFields2 = { Strings: cfStrings };
-      r = await managerCall(ep, accessToken, 'POST', listPath, payload);
+      r = await managerCall(ep, accessToken, 'POST', createPath, payload);
       action = 'created';
-      // POST returns the full list; find the new item's key
-      if (r.status === 200 && r.data && r.data[listKey]) {
-        const created = r.data[listKey].find(i => {
-          const cd = (i.code || i.Code || '').toLowerCase();
-          const nm = (i.itemName || i.name || i.Name || '').toLowerCase();
-          return (codeLower && cd === codeLower) || nm === nameLower;
-        });
-        if (created) existingKey = created.key || created.Key;
+      // Form endpoint on success redirects (302) or returns 200/201; fetch new key
+      // by looking up the item by code in the list
+      if ((r.status >= 200 && r.status < 400)) {
+        try {
+          const listR = await managerCall(ep, accessToken, 'GET', listPath, null);
+          const arr = listR.data && listR.data[listKey];
+          if (Array.isArray(arr)) {
+            const created = arr.find(i => {
+              const cd = (i.code || i.Code || '').toLowerCase();
+              const nm = (i.itemName || i.name || i.Name || '').toLowerCase();
+              return (codeLower && cd === codeLower) || nm === nameLower;
+            });
+            if (created) existingKey = created.key || created.Key;
+          }
+        } catch(_) {}
       }
-      console.log(`   Manager POST: HTTP ${r.status}`, JSON.stringify(r.data || '').slice(0, 200));
-      const ok = r.status >= 200 && r.status < 300;
+      console.log(`   Manager POST: HTTP ${r.status} → key: ${existingKey||'unknown'}`);
+      const ok = r.status >= 200 && r.status < 400;
       const written = Object.keys(cfStrings).length;
       return res.json(ok
         ? { success: true, action, managerId: existingKey || null, comCodeWritten: !!(comCodeFieldKey && item.comCode), fieldsWritten: written }
@@ -811,6 +874,156 @@ app.get('/api/goods/manager-items', async (req, res) => {
   }
 });
 
+app.get('/api/manager/accounts', async (req, res) => {
+  const ep = normEp(req.query.ep || '');
+  const tk = req.query.tk || '';
+  if (!ep || !tk) return res.status(400).json({ success: false, error: 'ep and tk required' });
+  // Try several common Manager account-list endpoints
+  const paths = ['/profit-and-loss-accounts', '/income-statement-accounts', '/balance-sheet-accounts', '/accounts', '/chart-of-accounts'];
+  for (const path of paths) {
+    try {
+      const r = await managerCall(ep, tk, 'GET', path, null);
+      if (r.status === 200 && r.data) {
+        // Find the array inside the response object
+        const arr = Array.isArray(r.data) ? r.data : Object.values(r.data).find(v => Array.isArray(v) && v.length && v[0].key);
+        if (arr && arr.length) {
+          const accounts = arr.map(a => ({ key: a.key || a.Key, name: a.name || a.Name || a.accountName || '' })).filter(a => a.key);
+          console.log(`   Manager accounts from ${path}: ${accounts.length} items`);
+          return res.json({ success: true, accounts });
+        }
+      }
+    } catch(e) {}
+  }
+  res.json({ success: true, accounts: [] });
+});
+
+app.get('/api/manager/divisions', async (req, res) => {
+  const ep = normEp(req.query.ep || '');
+  const tk = req.query.tk || '';
+  if (!ep || !tk) return res.status(400).json({ success: false, error: 'ep and tk required' });
+  try {
+    const r = await managerCall(ep, tk, 'GET', '/divisions', null);
+    if (r.status === 200 && r.data) {
+      const arr = Array.isArray(r.data) ? r.data : (r.data.divisions || []);
+      const divisions = arr.map(d => ({ key: d.key || d.Key, name: d.name || d.Name || '' })).filter(d => d.key);
+      return res.json({ success: true, divisions });
+    }
+    res.json({ success: true, divisions: [] });
+  } catch(e) {
+    res.json({ success: false, error: e.message });
+  }
+});
+
+// List all Manager items (inventory + non-inventory) for the create-receipt picker
+app.get('/api/manager/items-list', async (req, res) => {
+  const ep = normEp(req.query.ep || '');
+  const tk = req.query.tk || '';
+  if (!ep || !tk) return res.status(400).json({ success: false, error: 'ep and tk required' });
+  try {
+    const [invR, niR] = await Promise.all([
+      managerCall(ep, tk, 'GET', '/inventory-items', null),
+      managerCall(ep, tk, 'GET', '/non-inventory-items', null)
+    ]);
+    const mapItem = (i, type) => ({
+      key:   i.key  || i.Key  || '',
+      code:  i.code || i.Code || i.ItemCode || '',
+      name:  i.itemName || i.ItemName || i.name || i.Name || '',
+      price: parseFloat(i.salesPrice || i.SalesPrice || i.unitPrice || i.UnitPrice || i.defaultPrice || i.DefaultPrice || i.price || i.Price || 0) || 0,
+      type
+    });
+    const inv = (invR.data && (invR.data.inventoryItems  || invR.data.InventoryItems  || [])).map(i => mapItem(i, 'inventory'));
+    const ni  = (niR.data  && (niR.data.nonInventoryItems || niR.data.NonInventoryItems || [])).map(i => mapItem(i, 'service'));
+    console.log(`[items-list] inventory=${inv.length} non-inventory=${ni.length} first=${JSON.stringify((inv[0]||ni[0])||{})}`);
+    res.json({ success: true, items: [...inv, ...ni] });
+  } catch(e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// Create a new receipt in Manager (then the frontend submits to EFRIS separately)
+app.post('/api/manager/create-receipt', async (req, res) => {
+  const { managerEndpoint, accessToken, receipt } = req.body || {};
+  if (!managerEndpoint || !accessToken) return res.status(400).json({ success: false, error: 'Missing Manager credentials' });
+  const ep = normEp(managerEndpoint);
+  try {
+    // GET blank form template so we have the correct shape (including hidden fields)
+    const tmplR = await managerCall(ep, accessToken, 'GET', '/receipt-form', null);
+    if (tmplR.status !== 200) {
+      return res.status(502).json({ success: false, error: `Manager receipt-form GET failed: HTTP ${tmplR.status}` });
+    }
+    const form = Object.assign({}, tmplR.data || {});
+    // Remove identity fields so Manager creates a new record
+    delete form.Key; delete form.key; delete form.id; delete form.UniqueName; delete form.NameWithCode;
+    // Populate
+    form.Date = receipt.date || new Date().toISOString().slice(0, 10);
+    if (receipt.reference) form.Reference = receipt.reference;
+    if (receipt.customer)   form.Customer   = receipt.customer;
+    if (receipt.receivedIn) form.ReceivedIn  = receipt.receivedIn;
+    if (receipt.description) form.Description = receipt.description;
+    form.QuantityColumn = true;
+    form.UnitPriceColumn = true;
+    form.HasLineDescription = true;
+    form.Lines = (receipt.lines || []).map(l => {
+      const line = { Qty: parseFloat(l.qty) || 1, UnitPrice: parseFloat(l.unitPrice) || 0 };
+      if (l.itemKey) line.Item = l.itemKey;
+      if (l.description) line.LineDescription = l.description;
+      return line;
+    });
+    const createR = await managerCall(ep, accessToken, 'POST', '/receipt-form', form);
+    if (createR.status < 200 || createR.status >= 300) {
+      return res.status(502).json({
+        success: false,
+        error: `Manager receipt creation failed: HTTP ${createR.status}`,
+        detail: JSON.stringify(createR.data || '').slice(0, 500),
+        formFields: Object.keys(form)
+      });
+    }
+    // Extract new key
+    let newKey = null;
+    const rd = createR.data;
+    if (rd && rd.key) newKey = rd.key;
+    else if (rd && rd.Key) newKey = rd.Key;
+    else if (Array.isArray(rd) && rd.length) {
+      const found = rd.find(r => (r.reference || r.Reference) === receipt.reference);
+      newKey = ((found || rd[rd.length - 1]).key);
+    }
+    if (!newKey && createR.headers) {
+      const loc = createR.headers['location'] || createR.headers['Location'] || '';
+      if (loc) { const parts = loc.split('/').filter(Boolean); newKey = parts[parts.length - 1]; }
+    }
+    console.log(`   Created Manager receipt → key: ${newKey || 'unknown'} ref: ${receipt.reference || ''}`);
+    res.json({ success: true, key: newKey, reference: receipt.reference });
+  } catch(e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.post('/api/manager/inventory-adjust', async (req, res) => {
+  const { managerEndpoint, accessToken, itemKey, qty, date, description } = req.body || {};
+  if (!managerEndpoint || !accessToken || !itemKey) {
+    return res.status(400).json({ success: false, error: 'managerEndpoint, accessToken and itemKey are required' });
+  }
+  const ep = normEp(managerEndpoint);
+  const payload = {
+    Date: date || new Date().toISOString().slice(0, 10),
+    Description: description || 'Initial stock entry',
+    Lines: [{ InventoryItem: itemKey, Qty: parseFloat(qty) || 0, UnitCost: 0 }]
+  };
+  // Manager's inventory adjustment document type varies — try paths in order
+  const adjPaths = ['/inventory-write-up-form', '/inventory-quantity-adjustment-form', '/inventory-adjustment-form', '/inventory-write-ups-form'];
+  try {
+    let lastErr = '';
+    for (const adjPath of adjPaths) {
+      const r = await managerCall(ep, accessToken, 'POST', adjPath, payload);
+      console.log(`   Inventory adjust ${adjPath}: HTTP ${r.status} for item ${itemKey} qty=${qty}`);
+      if (r.status >= 200 && r.status < 400) return res.json({ success: true, path: adjPath });
+      if (r.status !== 404) { lastErr = `HTTP ${r.status}: ${JSON.stringify(r.data||'').slice(0,200)}`; break; }
+      lastErr = `HTTP 404 on ${adjPath}`;
+    }
+    res.json({ success: false, error: `Could not create inventory adjustment — ${lastErr}. Please set opening stock in Manager directly (Inventory → Write-ups).` });
+  } catch(e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
 // Full details for a single Manager.io item (for import prefill)
 app.get('/api/goods/manager-item-detail', async (req, res) => {
   const ep = normEp(req.query.ep || '');
@@ -837,6 +1050,11 @@ app.get('/api/goods/manager-item-detail', async (req, res) => {
       description:            d.description || d.Description || '',
       defaultLineDescription: d.defaultLineDescription || d.DefaultLineDescription || '',
       customFieldStrings:     cfStrings,
+      division:               d.division || d.Division || '',
+      salesDivision:          d.salesDivision || d.SalesDivision || '',
+      costMethod:             d.costMethod != null ? d.costMethod : (d.CostMethod != null ? d.CostMethod : ''),
+      whenSold:               d.whenSold || d.WhenSold || '',
+      whenPurchased:          d.whenPurchased || d.WhenPurchased || '',
     }});
   } catch(e) {
     res.json({ success: false, error: e.message });
@@ -1042,18 +1260,63 @@ app.post('/api/efris/submit-invoice', async (req, res) => {
         antifakeCode = d.antiFakeCode || d.antifakeCode || bi.antifakeCode || bi.antiFakeCode;
         const issuedDate = bi.issuedDate || bi.issueDate || d.issuedDate || '';
         const deviceNo = bi.deviceNo || bi.deviceNumber || d.deviceNo || config.deviceNo || '';
+        const invoiceId = bi.invoiceId || bi.invoiceID || d.invoiceId || '';
         qrCode = d.qrCode || d.qrCodeBase64 || bi.qrCode;
-        // Store antifakeCode as the QR content — Manager's "QR Code" type field
-        // renders whatever text is stored as a QR image on printed documents.
-        // A plain numeric string (no URL special chars) renders reliably.
         if (!qrCode && antifakeCode) qrCode = antifakeCode;
         console.log(`   T109 result — FDN: ${fdn}, antifakeCode: ${antifakeCode}, deviceNo: ${deviceNo}, issuedDate: ${issuedDate}, qrCode: ${qrCode}`);
       }
     } catch(e) { console.log(`   T109 content parse error: ${e.message}`); }
     const ok = rc === '00' || !!fdn;
     res.json(ok
-      ? { success: true, fdn, qrCode, antifakeCode, deviceNo: config.deviceNo, issuedDate: new Date().toISOString(), returnCode: rc, returnMessage: rm }
+      ? { success: true, fdn, qrCode, antifakeCode, deviceNo: config.deviceNo, issuedDate: new Date().toISOString(), invoiceId, returnCode: rc, returnMessage: rm }
       : { success: false, error: 'URA ' + rc + ': ' + rm, returnCode: rc });
+  } catch(e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.post('/api/efris/verify-tin', async (req, res) => {
+  const { buyerTin, config } = req.body || {};
+  if (!buyerTin || !config || !config.tin) return res.status(400).json({ success: false, error: 'buyerTin and config required' });
+  const eu = config.mode === 'production'
+    ? 'https://efrisws.ura.go.ug/ws/taapp/getInformation'
+    : 'https://efristest.ura.go.ug/efrisws/ws/taapp/getInformation';
+  try {
+    const session = await getSession(config.tin, config.deviceNo, config.efrisPassword, eu);
+    // T119: taxpayer query — look up a TIN to verify it exists and get details
+    const t119 = await efrisCall(eu, efrisEnvEnc('T119', { tin: buyerTin, ninBrn: '', queryType: '1' }, config.tin, config.deviceNo, session.aesKey, session.privatePem));
+    const rc = t119.data && t119.data.returnStateInfo ? t119.data.returnStateInfo.returnCode : null;
+    const rm = t119.data && t119.data.returnStateInfo ? t119.data.returnStateInfo.returnMessage : '';
+    let info = null;
+    if (t119.data && t119.data.data && t119.data.data.content) {
+      try {
+        const s = aesDecryptStr(t119.data.data.content, session.aesKey);
+        info = JSON.parse(s);
+        console.log('[T119 taxpayer fields]', JSON.stringify(info));
+      } catch(e) {}
+    }
+    const ok = rc === '00';
+    // Extract taxpayer name from whichever field EFRIS returns (varies by API version)
+    let taxpayerName = '';
+    if (info) {
+      const tp = info.taxpayer || info;
+      taxpayerName = tp.taxpayerName || tp.taxpayerLegalName || tp.legalName
+        || tp.entityName || tp.taxPayerName || tp.businessName || tp.name || '';
+    }
+    res.json(ok
+      ? { success: true, tin: buyerTin, taxpayer: info, taxpayerName, returnCode: rc }
+      : { success: false, error: 'URA ' + rc + ': ' + rm, returnCode: rc });
+  } catch(e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.post('/api/efris/preview-invoice', async (req, res) => {
+  const { invoice, config } = req.body || {};
+  if (!invoice || !config) return res.status(400).json({ success: false, error: 'invoice and config required' });
+  try {
+    const t109data = buildT109(invoice, config);
+    res.json({ success: true, payload: t109data });
   } catch(e) {
     res.status(500).json({ success: false, error: e.message });
   }
@@ -1079,21 +1342,120 @@ app.post('/api/efris/save-to-manager', async (req, res) => {
     const cf = await mgrTextCustomFields(ep, accessToken);
     form.CustomFields2 = form.CustomFields2 || {};
     form.CustomFields2.Strings = form.CustomFields2.Strings || {};
-    const setCF = (name, val) => { const k = cf.byName[name]; if (k && val != null && val !== '') form.CustomFields2.Strings[k] = String(val); };
     const setCFAny = (names, val) => { for (const n of names) { const k = cf.byName[n]; if (k && val != null && val !== '') { form.CustomFields2.Strings[k] = String(val); break; } } };
-    setCF('EFRIS FDN', efrisData.fdn);
-    setCF('EFRIS Antifake Code', efrisData.antifakeCode);
-    // QR Code field: store antifake code — Manager "QR Code" type renders it as QR image
-    setCFAny(['EFRIS QR Code URL', 'EFRIS QR Code'], efrisData.qrCode || efrisData.antifakeCode);
+    setCFAny(['Fiscal Document Number', 'EFRIS FDN'], efrisData.fdn);
+    setCFAny(['Verification Code', 'EFRIS Antifake Code'], efrisData.antifakeCode);
+    // QR Code field: store antifake code — Manager "QR Code" type renders it as QR image on printed docs
+    setCFAny(['QR Code', 'EFRIS QR Code URL', 'EFRIS QR Code'], efrisData.qrCode || efrisData.antifakeCode);
     setCFAny(['EFRIS Device Number', 'Device Number'], efrisData.deviceNo);
     setCFAny(['EFRIS Issued Time', 'Issued Time'], efrisData.issuedDate ? new Date(efrisData.issuedDate).toLocaleString('en-UG', { timeZone: 'Africa/Kampala' }) : '');
-    setCF('EFRIS Status', 'Submitted');
-    setCF('EFRIS Submission Date', new Date().toISOString().slice(0,10));
+    if (efrisData.invoiceId) setCFAny(['EFRIS Invoice ID', 'Invoice ID'], efrisData.invoiceId);
+    setCFAny(['Status', 'EFRIS Status'], 'Submitted');
+    setCFAny(['Submission Date', 'EFRIS Submission Date'], new Date().toISOString().slice(0,10));
     const postR = await managerCall(ep, accessToken, 'POST', formBase + '/' + key, form);
     const ok = postR.status === 200 || postR.status === 201 || postR.status === 204;
     res.json(ok ? { success: true } : { success: false, error: 'Manager POST returned ' + postR.status, fdn: efrisData.fdn });
   } catch(e) {
     res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// Create a credit note in Manager linked to the original invoice/receipt
+app.post('/api/manager/create-credit-note', async (req, res) => {
+  const { managerEndpoint, accessToken, originalKey, originalDocType, reason, efrisFdn, efrisInvoiceId } = req.body || {};
+  if (!managerEndpoint || !accessToken || !originalKey) return res.status(400).json({ success: false, error: 'Missing required fields' });
+  const ep = normEp(managerEndpoint);
+
+  // First read the original document to get its lines and details
+  let origForm = null, origFormBase = '/sales-invoice-form';
+  const invR = await managerCall(ep, accessToken, 'GET', '/sales-invoice-form/' + originalKey, null);
+  if (invR.status === 200 && invR.data && !invR.data.error) {
+    origForm = invR.data; origFormBase = '/sales-invoice-form';
+  } else {
+    const rcptR = await managerCall(ep, accessToken, 'GET', '/receipt-form/' + originalKey, null);
+    if (rcptR.status === 200 && rcptR.data && !rcptR.data.error) {
+      origForm = rcptR.data; origFormBase = '/receipt-form';
+    }
+  }
+  if (!origForm) return res.status(404).json({ success: false, error: 'Original document not found in Manager' });
+
+  // Try Manager's credit note form endpoints in order of likelihood
+  const cnPaths = ['/sales-credit-note-form', '/credit-note-form', '/debit-note-form'];
+  let tmpl = null, cnFormBase = null;
+  for (const path of cnPaths) {
+    try {
+      const r = await managerCall(ep, accessToken, 'GET', path, null);
+      if (r.status === 200 && r.data && !r.data.error) { tmpl = r.data; cnFormBase = path; break; }
+    } catch(_) {}
+  }
+
+  if (tmpl && cnFormBase) {
+    // Use Manager's native credit note form
+    const form = Object.assign({}, tmpl);
+    delete form.Key; delete form.key; delete form.id; delete form.UniqueName;
+    form.Date = new Date().toISOString().slice(0, 10);
+    form.Reference = 'CN-' + (origForm.Reference || origForm.InvoiceNumber || originalKey.slice(0, 8));
+    form.Description = reason + (efrisFdn ? ' | Original FDN: ' + efrisFdn : '');
+    // Link original document if field exists
+    if ('SalesInvoice' in tmpl) form.SalesInvoice = originalKey;
+    else if ('Receipt' in tmpl) form.Receipt = originalKey;
+    else if ('OriginalInvoice' in tmpl) form.OriginalInvoice = originalKey;
+    // Copy lines from original (negative qty = credit)
+    if (origForm.Lines) form.Lines = origForm.Lines;
+    // Copy customer
+    if (origForm.Customer) form.Customer = origForm.Customer;
+    else if (origForm.Contact) form.Contact = origForm.Contact;
+
+    const createR = await managerCall(ep, accessToken, 'POST', cnFormBase, form);
+    let newKey = null;
+    if (createR.data && createR.data.key) newKey = createR.data.key;
+    else if (createR.data && createR.data.Key) newKey = createR.data.Key;
+    console.log(`   Manager credit note created via ${cnFormBase} → key: ${newKey || 'unknown'}`);
+
+    // Save EFRIS FDN to the new credit note record if we got a key
+    if (newKey && efrisFdn) {
+      try {
+        const cfMeta = await mgrTextCustomFields(ep, accessToken);
+        const getCN = await managerCall(ep, accessToken, 'GET', cnFormBase + '/' + newKey, null);
+        if (getCN.status === 200 && getCN.data) {
+          const cnForm = getCN.data;
+          const setCF = (names, val) => {
+            const matchedName = Object.keys(cfMeta.byName).find(n => names.some(label => n.toLowerCase().includes(label.toLowerCase())));
+            if (matchedName) {
+              const cfKey = cfMeta.byName[matchedName];
+              if (!cnForm.CustomFields2) cnForm.CustomFields2 = { Strings: {} };
+              if (!cnForm.CustomFields2.Strings) cnForm.CustomFields2.Strings = {};
+              cnForm.CustomFields2.Strings[cfKey] = String(val);
+            }
+          };
+          setCF(['Fiscal Document', 'FDN', 'EFRIS FDN'], efrisFdn);
+          setCF(['Status', 'EFRIS Status'], 'Credit Note');
+          await managerCall(ep, accessToken, 'POST', cnFormBase + '/' + newKey, cnForm);
+        }
+      } catch(_) {}
+    }
+    return res.json({ success: true, key: newKey, method: cnFormBase });
+  }
+
+  // Fallback: no native credit note form — create a negative receipt/invoice
+  console.log('   No credit note form found — creating negative receipt as fallback');
+  try {
+    const fallbackForm = Object.assign({}, origForm);
+    delete fallbackForm.Key; delete fallbackForm.key; delete fallbackForm.id; delete fallbackForm.UniqueName;
+    fallbackForm.Date = new Date().toISOString().slice(0, 10);
+    fallbackForm.Reference = 'CN-' + (origForm.Reference || '');
+    fallbackForm.Description = reason + (efrisFdn ? ' | Credit Note FDN: ' + efrisFdn : '');
+    if (fallbackForm.Lines) {
+      fallbackForm.Lines = fallbackForm.Lines.map(l => ({ ...l, Qty: -(parseFloat(l.Qty) || 1), UnitPrice: parseFloat(l.UnitPrice) || 0 }));
+    }
+    const fallR = await managerCall(ep, accessToken, 'POST', origFormBase, fallbackForm);
+    let newKey = null;
+    if (fallR.data && fallR.data.key) newKey = fallR.data.key;
+    else if (Array.isArray(fallR.data) && fallR.data.length) newKey = fallR.data[fallR.data.length - 1].key;
+    console.log(`   Fallback negative ${origFormBase} → key: ${newKey || 'unknown'}`);
+    return res.json({ success: true, key: newKey, method: origFormBase + ' (negative fallback)' });
+  } catch(e) {
+    return res.status(500).json({ success: false, error: e.message });
   }
 });
 
@@ -1124,7 +1486,16 @@ app.get('/api/manager/invoices', async (req, res) => {
     try {
       const rr = await managerCall(ep, tk, 'GET', '/receipts', null);
       const rcpts = (rr.status === 200 && rr.data && (rr.data.receipts || rr.data.receiptsAndPayments)) || [];
-      rcpts.forEach(i => list.push({ key: i.key, reference: i.reference || i.payee || '(receipt)', customer: i.payer || i.customer || i.contact || '', amount: (i.amount && i.amount.value) || i.amount || 0, currency: (i.amount && i.amount.currency) || '', date: i.date || i.issueDate, status: i.status, docType: 'receipt' }));
+      const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const rcptItems = rcpts.map(i => ({ key: i.key, reference: i.reference || i.payee || '(receipt)', _ck: i.payer || i.customer || i.contact || '', amount: (i.amount && i.amount.value) || i.amount || 0, currency: (i.amount && i.amount.currency) || '', date: i.date || i.issueDate, status: i.status, docType: 'receipt' }));
+      // Resolve contact UUIDs to display names in parallel (Manager stores payer as a contact key)
+      await Promise.all(rcptItems.map(async item => {
+        if (item._ck && UUID_RE.test(item._ck)) {
+          try { const c = (await managerCall(ep, tk, 'GET', '/customer-form/' + item._ck)).data; if (c && c.Name) item.customer = c.Name; } catch(_) {}
+        } else { item.customer = item._ck; }
+        delete item._ck;
+      }));
+      rcptItems.forEach(i => list.push(i));
     } catch(_) {}
     res.json({ success: true, business: (r.data && r.data.business && r.data.business.name) || '', invoices: list });
   } catch(e) {

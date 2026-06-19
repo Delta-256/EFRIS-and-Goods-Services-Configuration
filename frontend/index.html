@@ -7,7 +7,8 @@
 <style>
   :root{--g:#2e7d32;--gl:#43a047;--gd:#1b5e20;--gold:#f9a825;--red:#c62828;--blue:#1565c0;--gray:#546e7a;--bg:#f1f8e9;--bdr:#c8e6c9;--txt:#1a2e1a;--txtl:#4a6741;}
   *{box-sizing:border-box;margin:0;padding:0;}
-  body{font-family:'Segoe UI',Arial,sans-serif;background:var(--bg);color:var(--txt);font-size:13px;line-height:1.5;}
+  body{font-family:'Segoe UI',Arial,sans-serif;background:var(--bg);color:var(--txt);font-size:14px;line-height:1.5;}
+  @media(min-width:600px){body{font-size:15px;}.wrap{padding:13px 16px;}.hdr{padding:13px 16px;}.btn{padding:9px 16px;font-size:13px;}.fg input,.fg select,.fg textarea{padding:7px 10px;font-size:13px;}.tabs{gap:3px;}.tab{padding:6px 13px;font-size:12px;}}
   .hdr{background:linear-gradient(135deg,var(--gd),var(--g),var(--gl));color:white;padding:11px 14px;display:flex;align-items:center;gap:9px;border-bottom:3px solid var(--gold);}
   .hdr h1{font-size:14px;font-weight:700;}.hdr .sub{font-size:10px;opacity:.85;}
   .badge{margin-left:auto;padding:3px 9px;border-radius:20px;font-size:10px;font-weight:700;}
@@ -81,6 +82,9 @@
   .ftr{background:var(--gd);color:rgba(255,255,255,.85);padding:9px 13px;font-size:10px;text-align:center;line-height:1.7;}
   .ftr a{color:var(--gold);text-decoration:none;}.reg{color:rgba(255,255,255,.5);font-size:9px;}
   .hidden{display:none!important;}.mt{margin-top:7px;}hr{border:none;border-top:1px solid var(--bdr);margin:8px 0;}
+  .ctype-btn{padding:6px 4px;font-size:11px;border:1px solid var(--bdr);border-radius:5px;background:#f9f9f9;cursor:pointer;color:var(--txt);transition:all .15s;}
+  .ctype-btn.on{background:var(--g);color:#fff;border-color:var(--gd);font-weight:600;}
+  .ctype-btn:hover:not(.on){background:#e8f5e9;border-color:var(--g);}
   .g-steps{display:flex;gap:0;margin-bottom:10px;border:1px solid var(--bdr);border-radius:6px;overflow:hidden;}
   .g-step{flex:1;padding:6px 3px;text-align:center;font-size:10px;color:var(--gray);background:#f9f9f9;border-right:1px solid var(--bdr);cursor:default;}
   .g-step:last-child{border-right:none;}
@@ -197,13 +201,91 @@
         <div class="al aw">&#128177; Non-UGX detected. Enter today's exchange rate:</div>
         <div class="fg"><label>1 <span id="fxLbl">USD</span> = ? UGX</label><input type="number" id="fxVal" placeholder="e.g. 3650"/></div>
       </div>
+      <!-- Customer Type selector -->
       <div class="fg mt">
-        <label>Customer TIN <span style="font-weight:400;color:var(--gray)">(B2B only &mdash; blank for walk-in/tourists)</span></label>
-        <input id="cTIN" placeholder="Leave blank for B2C receipts"/>
+        <label>Customer Type</label>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:3px;" id="custTypeGrid">
+          <button type="button" class="ctype-btn on" data-type="b2c" onclick="setCustType('b2c')">Walk-in / Local</button>
+          <button type="button" class="ctype-btn" data-type="b2b" onclick="setCustType('b2b')">Business (B2B)</button>
+          <button type="button" class="ctype-btn" data-type="b2g" onclick="setCustType('b2g')">Government (B2G)</button>
+          <button type="button" class="ctype-btn" data-type="foreign" onclick="setCustType('foreign')">Foreign / Tourist</button>
+        </div>
       </div>
-      <div id="subDone" class="hidden"><div class="al as">&#10003; Already submitted &mdash; FDN: <strong id="exFDN"></strong></div></div>
+      <!-- B2B fields -->
+      <div id="cust-b2b" class="cust-fields" style="display:none;">
+        <div class="fg mt"><label>Business TIN <span style="font-weight:400;color:var(--gray);">*required for B2B</span></label>
+          <div style="display:flex;gap:6px;"><input id="cTIN" placeholder="Enter customer TIN" style="flex:1;"/>
+          <button type="button" class="btn bo bsm" onclick="quickVerifyTin()" style="white-space:nowrap;">Verify &#128269;</button></div>
+          <div id="cTINResult" style="font-size:11px;margin-top:3px;"></div>
+        </div>
+      </div>
+      <!-- B2G fields -->
+      <div id="cust-b2g" class="cust-fields" style="display:none;">
+        <div class="fg mt"><label>Government TIN <span style="font-weight:400;color:var(--gray);">(optional)</span></label>
+          <div style="display:flex;gap:6px;"><input id="cGovTIN" placeholder="Ministry TIN (if known)" style="flex:1;"/>
+          <button type="button" class="btn bo bsm" onclick="quickVerifyGovTin()" style="white-space:nowrap;">Verify &#128269;</button></div>
+          <div id="cGovTINResult" style="font-size:11px;margin-top:3px;"></div>
+        </div>
+        <div class="fg"><label>Ministry / Department *</label><input id="cGovDept" placeholder="e.g. Ministry of Tourism"/></div>
+      </div>
+      <!-- Foreign fields -->
+      <div id="cust-foreign" class="cust-fields" style="display:none;">
+        <div class="g2 mt">
+          <div class="fg"><label>Passport Number *</label><input id="cPassport" placeholder="e.g. A12345678"/></div>
+          <div class="fg"><label>Nationality / Country *</label><input id="cNationality" placeholder="e.g. United Kingdom"/></div>
+        </div>
+        <div class="fg"><label>Guest Name *</label><input id="cForeignName" placeholder="Full name as on passport"/></div>
+      </div>
+      <div id="subDone" class="hidden">
+        <div class="al as">&#10003; Already submitted &mdash; FDN: <strong id="exFDN"></strong>
+          <button type="button" class="btn bo bsm" onclick="openCreditNoteModal()" style="margin-left:10px;background:#c62828;color:#fff;border-color:#c62828;">&#8617; Issue Credit Note</button>
+        </div>
+      </div>
+
+      <!-- Credit Note Modal -->
+      <div id="cnModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.45);z-index:999;overflow-y:auto;">
+        <div style="background:#fff;border-radius:10px;max-width:420px;margin:40px auto;padding:20px;box-shadow:0 4px 24px rgba(0,0,0,.3);">
+          <div style="font-weight:700;font-size:15px;margin-bottom:12px;color:#c62828;">&#8617; Issue Credit Note</div>
+          <div style="font-size:12px;color:var(--gray);margin-bottom:12px;">Original FDN: <strong id="cnOrigFDN"></strong></div>
+          <div class="fg">
+            <label>Reason for Credit Note *</label>
+            <select id="cnReasonCode" onchange="updateCnReason()" style="margin-bottom:6px;">
+              <option value="">— Select reason —</option>
+              <option value="Goods returned by customer">Goods returned by customer</option>
+              <option value="Overcharge on original invoice">Overcharge on original invoice</option>
+              <option value="Wrong item supplied">Wrong item supplied</option>
+              <option value="Invoice issued in error">Invoice issued in error</option>
+              <option value="Cancelled order">Cancelled order</option>
+              <option value="Partial cancellation">Partial cancellation</option>
+              <option value="Other">Other (specify below)</option>
+            </select>
+            <input id="cnReasonDetail" placeholder="Additional details or specify reason…" style="font-size:12px;"/>
+          </div>
+          <div class="fg" style="margin-top:8px;">
+            <label>Original Invoice Reference</label>
+            <input id="cnOrigRef" readonly style="background:#f9f9f9;color:var(--gray);font-size:12px;"/>
+          </div>
+          <div style="font-size:11px;color:#666;margin:8px 0;padding:8px;background:#fff8e1;border-radius:5px;border-left:3px solid #f9a825;">
+            This will create a credit note on URA EFRIS cancelling the original e-Receipt, and record it in Manager.io for the tax official to review.
+          </div>
+          <div style="display:flex;gap:8px;margin-top:12px;">
+            <button class="btn bo" style="flex:1;" onclick="closeCnModal()">Cancel</button>
+            <button class="btn" style="flex:2;background:#c62828;color:#fff;border-color:#c62828;" onclick="doCreditNote()">Issue Credit Note</button>
+          </div>
+        </div>
+      </div>
+      <div class="fg mt">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+          <label style="margin:0;">Payment Ways</label>
+          <button type="button" class="btn bo bsm" onclick="addPayWay()" style="padding:2px 8px;font-size:11px;">+ Add</button>
+        </div>
+        <div id="payWaysList"></div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px;">
+        <button class="btn bo bsm" onclick="doPreview()" style="flex:0 0 auto;">&#128065; Preview</button>
+        <button class="btn bg" id="btnSub" onclick="doSubmit()" style="flex:1;">&#128228; Submit to URA EFRIS</button>
+      </div>
       <div id="subProg"></div>
-      <button class="btn bg" id="btnSub" onclick="doSubmit()">&#128228; Submit to URA EFRIS</button>
     </div>
     <div class="rcard hidden" id="rCard">
       <h4>&#10003; Successfully submitted to URA EFRIS</h4>
@@ -223,9 +305,10 @@
   <div id="tStat" class="hidden">
     <div class="card"><div class="ct">&#128203; EFRIS Status</div><div id="statCont"><div style="color:var(--gray);font-size:11px;text-align:center;padding:14px;">Open an invoice to see its status</div></div></div>
     <div class="card">
-      <div class="ct">&#128269; Verify on URA Portal</div>
-      <div class="fg"><label>FDN to verify</label><input id="fdnQ" placeholder="Paste FDN here"/></div>
-      <button class="btn bo" onclick="openVerify()">&#128279; Open URA Verification Page</button>
+      <div class="ct">&#128373; Verify Taxpayer TIN</div>
+      <div class="fg"><label>TIN to verify <span style="font-weight:400;color:var(--gray)">(B2B customer lookup)</span></label><input id="tinQ" placeholder="Enter TIN number"/></div>
+      <button class="btn bo" onclick="doVerifyTin()">&#128269; Verify TIN on EFRIS</button>
+      <div id="tinResult" class="mt"></div>
     </div>
   </div>
 
@@ -310,7 +393,7 @@
             </div>
           </div>
           <div class="fg"><label>&#9881; Item Profile Category</label>
-            <select id="gFldType">
+            <select id="gFldType" onchange="gOnTypeChange()">
               <option value="Service">Service (Non-inventory item)</option>
               <option value="Goods">Goods (Inventory item)</option>
             </select>
@@ -327,7 +410,34 @@
               <select id="gFldExcise"><option value="No">No</option><option value="Yes">Yes</option></select>
             </div>
           </div>
-          <div class="fg"><label>Remarks</label><textarea id="gFldRemarks" placeholder="Optional notes..."></textarea></div>
+          <div id="gAcctWrap" style="display:none;">
+            <div class="g2">
+              <div class="fg"><label>Account When Sold</label><select id="gFldWhenSold"><option value="">— Select account —</option></select></div>
+              <div class="fg"><label>Account When Purchased</label><select id="gFldWhenPurchased"><option value="">— Select account —</option></select></div>
+            </div>
+            <div class="g2">
+              <div class="fg"><label>Division</label><select id="gFldDivision"><option value="">— None —</option></select></div>
+              <div class="fg"><label>Autofill Sales Division</label><select id="gFldSalesDivision"><option value="">— None —</option></select></div>
+            </div>
+            <div class="fg goods-only" id="gValuationWrap" style="display:none;">
+              <label>Valuation Method</label>
+              <select id="gFldCostMethod">
+                <option value="">— Use Manager default —</option>
+                <option value="0">Average Cost (AVCO)</option>
+                <option value="1">First In First Out (FIFO)</option>
+                <option value="2">Standard Cost</option>
+              </select>
+            </div>
+            <div class="fg goods-only" id="gStockWrap" style="display:none;">
+              <label>Initial Stock Quantity <span style="font-weight:400;color:var(--gray);">(after creating item, set opening stock)</span></label>
+              <div style="display:flex;gap:6px;align-items:center;">
+                <input type="number" id="gFldInitQty" placeholder="e.g. 50" min="0" step="any" style="flex:1;"/>
+                <button type="button" class="btn bo bsm" onclick="gSetInitialStock()" style="white-space:nowrap;">&#128230; Set Stock</button>
+              </div>
+              <div id="gStockResult" style="font-size:11px;margin-top:3px;"></div>
+            </div>
+          </div>
+          <div class="fg"><label>Remarks / Line Description Autofill</label><textarea id="gFldRemarks" placeholder="Optional notes — also used as default line description on invoices"></textarea></div>
           <div id="gSyncStatus"></div>
           <div class="al ai efris-only" style="margin-top:6px;">&#128161; Sync to Manager.io to make the item usable on invoices. Register on EFRIS to add it to the URA goods registry (requires EFRIS credentials in Settings). You can do either or both.</div>
           <div class="row mt">
@@ -343,7 +453,7 @@
       <div class="card">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
           <div class="ct" style="margin:0;border:none;padding:0;">&#128203; My Items <span id="gItemCount" style="font-size:10px;font-weight:400;color:var(--gray)">0 items</span></div>
-          <button class="btn bg bsm" onclick="gSwSub('cfg');gGoStep(1)">&#10133; Add New</button>
+          <button class="btn bg bsm" onclick="gSwSub('cfg');gGoStep(1)">+ Add New</button>
         </div>
         <div class="card" style="margin-bottom:9px;">
           <div class="ct">&#128229; Import Existing Manager.io Items</div>
@@ -410,8 +520,12 @@
 <div class="scr" id="sNone">
   <div class="card">
     <div class="ct">&#128203; Select an Invoice to Submit</div>
-    <p style="font-size:12px;color:var(--gray);margin-bottom:8px;">Tap an invoice below to load it, then submit to EFRIS.</p>
-    <button onclick="loadList()" style="width:100%;padding:9px;border:1px solid var(--bdr);background:white;border-radius:6px;cursor:pointer;font-weight:600;color:var(--gd);margin-bottom:8px;">&#128260; Refresh invoice list</button>
+    <p style="font-size:12px;color:var(--gray);margin-bottom:8px;">Tap an invoice below to load it, or create a new receipt directly.</p>
+    <button onclick="showCreate()" class="btn bp" style="width:100%;margin-bottom:8px;">+ New Receipt</button>
+    <div style="display:flex;gap:6px;margin-bottom:6px;">
+      <button onclick="loadList()" style="flex:1;padding:8px;border:1px solid var(--bdr);background:white;border-radius:6px;cursor:pointer;font-weight:600;color:var(--gd);">&#128260; Refresh list</button>
+      <input id="pickSearch" placeholder="Search reference / customer…" style="flex:2;padding:8px;border:1px solid var(--bdr);border-radius:6px;font-size:12px;" oninput="filterPickList(this.value)"/>
+    </div>
     <div id="pickList"></div>
     <div id="ctxDbg" style="font-size:10px;color:#8a6d00;background:#fffbe6;border:1px solid #ffe58f;border-radius:5px;padding:5px 8px;margin:8px 0;word-break:break-all;"></div>
     <div class="al as">&#10003; Server is online &mdash; Cloudflare Tunnel active at <code>goods.twoservants.com</code></div>
@@ -421,6 +535,14 @@
       <strong>If you see a sad face icon</strong>, go to Manager &rarr; Settings &rarr; Custom Buttons &rarr; verify the URL is exactly as above.
     </div>
     <button class="btn bgld mt" onclick="showT('tSet',null);showScr('sMain')">&#9881; Go to Settings</button>
+  </div>
+</div>
+
+<!-- Preview Modal -->
+<div id="prevModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.55);z-index:1000;overflow-y:auto;padding:20px;">
+  <div style="background:#fff;border-radius:8px;max-width:520px;margin:0 auto;padding:20px;font-size:12px;position:relative;">
+    <button onclick="$('prevModal').style.display='none'" style="position:absolute;top:10px;right:12px;background:none;border:none;font-size:18px;cursor:pointer;color:#666;">✕</button>
+    <div id="prevContent"></div>
   </div>
 </div>
 
@@ -435,7 +557,7 @@
 'use strict';
 const RELAY = window.location.protocol + '//' + window.location.host;
 const SKEY = 'efris_v3';
-let CFG={}, INV=null, DKEY=null, MGR_EP=null, MGR_TK=null;
+let CFG={}, INV=null, DKEY=null, MGR_EP=null, MGR_TK=null, _lastInvKey=null, _invDebounce=null;
 const TG={vatReg:false,sandbox:true,gRegEfris:false,efrisEnabled:true};
 let obStep=1;
 
@@ -478,12 +600,14 @@ function obSh(n){
 function obn(from){
   if(from===1&&(!gvi('o1a')||!gvi('o1c'))){alert('Legal Name and Address are required');return;}
   if(from===2&&(!gvi('o2a')||!gvi('o2b')||!gvi('o2c'))){alert('TIN, Device No. and Password are required');return;}
-  // Non-EFRIS users skip the EFRIS Credentials step (step 2)
-  if(from===1 && TG.efrisEnabled===false){ obSh(3); return; }
+  // Non-EFRIS users skip steps 2 (EFRIS credentials) AND 3 (Tax & Mode) — go straight to Manager connection
+  if(from===1 && TG.efrisEnabled===false){ obSh(4); return; }
+  if(from===3 && TG.efrisEnabled===false){ obSh(4); return; }
   obSh(from+1);
 }
 function obb(from){
   // Mirror the skip on the way back
+  if(from===4 && TG.efrisEnabled===false){ obSh(1); return; }
   if(from===3 && TG.efrisEnabled===false){ obSh(1); return; }
   obSh(from-1);
 }
@@ -539,10 +663,39 @@ window.addEventListener('message', evt=>{
   window.managerAppContext=d;
   if(d.apiEndpoint){MGR_EP=d.apiEndpoint;if(!CFG.managerEndpoint)CFG.managerEndpoint=d.apiEndpoint;}
   if(d.apiAccessToken){MGR_TK=d.apiAccessToken;if(!CFG.accessToken)CFG.accessToken=d.apiAccessToken;}
+  // Detect Manager page context from the URL sent in the message
+  var pageUrl=d.url||d.currentUrl||d.pageUrl||d.href||'';
+  if(pageUrl) detectManagerPage(pageUrl);
   var k=d.Key||d.documentKey||d.key||d.recordKey||'';
   if(k&&typeof k==='string'){var parts=k.split('?')[0].split('/').filter(Boolean);k=parts.length?parts[parts.length-1]:'';DKEY=k;}
-  if(DKEY)loadInv(DKEY);
+  // Debounce: Manager sends many rapid messages for the same document.
+  // Wait 200ms of silence before loading — deduplicates bursts completely.
+  if(DKEY){
+    clearTimeout(_invDebounce);
+    if(DKEY!==_lastInvKey){ _invDebounce=setTimeout(()=>{_lastInvKey=DKEY;loadInv(DKEY);},200); }
+  } else if(!DKEY && CFG.managerEndpoint) routeByContext();
 });
+
+function detectManagerPage(url){
+  // If the Manager URL tells us we're on an item page, go to Goods tab
+  if(!CFG.managerEndpoint)return;
+  const already=document.querySelector('.scr.on');
+  if(already&&already.id==='sMain'&&!DKEY){
+    if(/\/(inventory-item|non-inventory-item|inventory-items|non-inventory-items)/i.test(url)){
+      showT('tGds',$('tabGds'));
+    }
+  }
+}
+
+function routeByContext(){
+  // Called when postMessage arrives with credentials but no document key.
+  // Read the ?mode= URL param to decide where to go.
+  const p=new URLSearchParams(window.location.search);
+  const mode=p.get('mode');
+  if(mode==='goods'){ showScr('sMain'); showT('tGds',$('tabGds')); }
+  else if(mode==='submit'){ showScr('sNone'); loadList(); }
+  // else: show choice landing (sNone default handles this)
+}
 
 function readParams(){
   const p=new URLSearchParams(window.location.search);
@@ -576,7 +729,16 @@ function renderInv(inv){
   tx('dTot',(inv.Currency||'UGX')+' '+fn(inv.Total||inv.GrossAmount||0));
   const curr=inv.Currency||'UGX';
   if(curr!=='UGX'){sh('fxRow');tx('fxLbl',curr);sv('fxVal',inv.ExchangeRate||'');}else hd('fxRow');
-  const fdn=inv.CustomFields&&inv.CustomFields['EFRIS FDN'];
+  // Reset ALL customer type state — prevents stale data from previous invoice bleeding in
+  _custType='b2c';
+  document.querySelectorAll('.ctype-btn').forEach(b=>b.classList.toggle('on',b.dataset.type==='b2c'));
+  document.querySelectorAll('.cust-fields').forEach(d=>d.style.display='none');
+  sv('cTIN',''); ht('cTINResult','');
+  sv('cGovTIN',''); sv('cGovDept',''); ht('cGovTINResult','');
+  sv('cPassport',''); sv('cNationality',''); sv('cForeignName','');
+  hd('subProg'); hd('rCard'); hd('errCard');
+  _payWays=[{mode:'101',amount:''}]; renderPayWays();
+  const fdn=(inv.CustomFields&&(inv.CustomFields['Fiscal Document Number']||inv.CustomFields['EFRIS FDN']))||'';
   if(fdn){sh('subDone');tx('exFDN',fdn);}else hd('subDone');
   const lines=inv.Lines||inv.Items||[];
   if(lines.length){
@@ -586,7 +748,12 @@ function renderInv(inv){
     h+='</div>';ht('dItems',h);
   }
   const s=inv.CustomFields||{};
-  ht('statCont','<div class="ig"><div class="if"><div class="lb">Status</div><div class="vl">'+(s['EFRIS Status']||'Not submitted')+'</div></div><div class="if"><div class="lb">Date</div><div class="vl">'+(s['EFRIS Submission Date']||'—')+'</div></div><div class="if full"><div class="lb">FDN</div><div class="vl">'+(s['EFRIS FDN']||'—')+'</div></div></div>'+(s['EFRIS Error Message']?'<div class="al aw">Last error: '+s['EFRIS Error Message']+'</div>':''));
+  const sGet=(...k)=>{ for(const n of k){if(s[n])return s[n];} return null; };
+  const sFdn=sGet('Fiscal Document Number','EFRIS FDN');
+  const sSt=sGet('Status','EFRIS Status');
+  const sDt=sGet('Submission Date','EFRIS Submission Date');
+  const sVer=sGet('Verification Code','EFRIS Antifake Code');
+  ht('statCont','<div class="ig"><div class="if"><div class="lb">Status</div><div class="vl '+(sSt==='Submitted'?'vg':'')+'">&#8203;'+(sSt||'Not submitted')+'</div></div><div class="if"><div class="lb">Submission Date</div><div class="vl">'+(sDt||'—')+'</div></div><div class="if full"><div class="lb">Fiscal Document Number</div><div class="vl">'+(sFdn||'—')+'</div></div>'+(sVer?'<div class="if full"><div class="lb">Verification Code</div><div class="vl">'+(sVer)+'</div></div>':'')+'</div>'+(s['EFRIS Error Message']?'<div class="al aw">Last error: '+s['EFRIS Error Message']+'</div>':''));
 }
 
 window.__invList=[];
@@ -602,17 +769,48 @@ async function loadList(){
     window.__invList=d.invoices||[];
     if(!window.__invList.length){ el.innerHTML='<div class="al ai">No sales invoices found.</div>'; return; }
     var h='<div style="font-size:11px;color:var(--gray);margin:4px 0 8px;">'+(d.business||'')+' — tap an invoice or receipt:</div>';
-    window.__invList.forEach(function(i,idx){ var badge=i.docType==='receipt'?'<span class="pill pill-svc" style="margin-left:5px;">Receipt</span>':'<span class="pill pill-gds" style="margin-left:5px;">Invoice</span>'; h+='<div onclick="pick('+idx+')" style="cursor:pointer;border:1px solid var(--bdr);border-radius:6px;padding:8px 10px;margin-bottom:6px;background:white;"><strong>'+(i.reference||'(no ref)')+'</strong> — '+(i.customer||'')+badge+'<br><span style="color:var(--gray);font-size:11px;">'+(i.currency||'')+' '+fn(i.amount)+' · '+fd(i.date)+'</span></div>'; });
+    window.__invList.forEach(function(i,idx){ var badge=i.docType==='receipt'?'<span class="pill pill-svc" style="margin-left:5px;">Receipt</span>':'<span class="pill pill-gds" style="margin-left:5px;">Invoice</span>'; var custLabel=i.customer||'<span style="color:var(--gray);font-style:italic;">Walk-in</span>'; h+='<div class="pick-row" onclick="pick('+idx+')" style="cursor:pointer;border:1px solid var(--bdr);border-radius:6px;padding:8px 10px;margin-bottom:6px;background:white;"><strong>'+(i.reference||'(no ref)')+'</strong> — '+custLabel+badge+'<br><span style="color:var(--gray);font-size:11px;">'+(i.currency||'')+' '+fn(i.amount)+' · '+fd(i.date)+'</span></div>'; });
     el.innerHTML=h;
   }catch(e){ el.innerHTML='<div class="al aw">Network error: '+e.message+'</div>'; }
 }
-function pick(idx){ var i=window.__invList[idx]; if(i){ DKEY=i.key; loadInv(i.key); } }
+function pick(idx){ var i=window.__invList[idx]; if(i){ DKEY=i.key; _lastInvKey=i.key; loadInv(i.key); } }
 
-function buildInv(){
+let _custType='b2c';
+function setCustType(t){
+  _custType=t;
+  document.querySelectorAll('.ctype-btn').forEach(b=>b.classList.toggle('on',b.dataset.type===t));
+  document.querySelectorAll('.cust-fields').forEach(d=>d.style.display='none');
+  const el=$('cust-'+t); if(el) el.style.display='';
+}
+async function _verifyTinInto(tin, resultId){
+  if(!CFG.tin){ht(resultId,'<span style="color:#c62828;">Setup EFRIS in Settings first</span>');return;}
+  ht(resultId,'<span style="color:var(--gray);">Verifying…</span>');
+  try{
+    const r=await fetch(RELAY+'/api/efris/verify-tin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({buyerTin:tin,config:{tin:CFG.tin,deviceNo:CFG.deviceNo,efrisPassword:CFG.efrisPassword,mode:CFG.sandbox?'sandbox':'production'}})});
+    const d=await r.json();
+    if(d.success){const nm=d.taxpayerName||(()=>{const tp=d.taxpayer||{};return tp.taxpayerName||tp.taxpayerLegalName||tp.legalName||tp.entityName||tp.taxPayerName||tp.businessName||tp.name||'';})();ht(resultId,'<span style="color:var(--g);">&#10003; '+(nm||'Valid TIN')+'</span>');}
+    else ht(resultId,'<span style="color:#c62828;">❌ '+esc(d.error)+'</span>');
+  }catch(e){ht(resultId,'<span style="color:#c62828;">Network error</span>');}
+}
+async function quickVerifyTin(){ const tin=gvi('cTIN'); if(!tin)return; await _verifyTinInto(tin,'cTINResult'); }
+async function quickVerifyGovTin(){ const tin=gvi('cGovTIN'); if(!tin)return; await _verifyTinInto(tin,'cGovTINResult'); }
+
+function buildInv(opts){
+  opts=opts||{};
   const inv=INV||{};const fx=parseFloat(gvi('fxVal')||'1')||1;
+  const t=_custType;
+  let custName=(inv.Customer&&inv.Customer.Name)||inv.CustomerName||'';
+  let custTIN='',custDept='',passportNum='',nationality='';
+  if(t==='b2b'){custTIN=gvi('cTIN')||(inv.CustomFields&&inv.CustomFields['Customer TIN'])||'';}
+  else if(t==='b2g'){custTIN=gvi('cGovTIN');custDept=gvi('cGovDept');if(custDept&&!custName)custName=custDept;}
+  else if(t==='foreign'){passportNum=gvi('cPassport');nationality=gvi('cNationality');const fn2=gvi('cForeignName');if(fn2)custName=fn2;}
   return{ Reference:inv.Reference||inv.Code||'INV-001', IssueDate:inv.IssueDate||inv.Date||new Date().toISOString().slice(0,10),
-    CustomerName:(inv.Customer&&inv.Customer.Name)||inv.CustomerName||'', CustomerTIN:gvi('cTIN')||(inv.CustomFields&&inv.CustomFields['Customer TIN'])||'',
-    CustomerAddress:(inv.Customer&&inv.Customer.Address)||'', Currency:'UGX', ExchangeRate:'1',
+    CustomerType:t, CustomerName:custName, CustomerTIN:custTIN, CustomerDept:custDept,
+    PassportNum:passportNum, Nationality:nationality,
+    CustomerAddress:(inv.Customer&&inv.Customer.Address)||'', Currency:inv.Currency||'UGX', ExchangeRate:fx,
+    IsRefund:opts.isRefund||false, OriginalFDN:opts.originalFDN||'', CreditNoteReason:opts.creditNoteReason||'',
+    PayWays:getPayWays(),
+    PaymentMode:(getPayWays()[0]||{}).mode||'101',
     Total:(inv.Total||0)*fx, AmountExcludingTax:(inv.AmountExcludingTax||0)*fx, TaxAmount:(inv.TaxAmount||0)*fx, Notes:inv.Notes||'',
     Lines:(inv.Lines||inv.Items||[]).map(l=>({ ItemName:l.ItemName||l.Description||l.Account||'Service',
       ItemCode:l.ItemCode||l.Code||'',
@@ -640,7 +838,7 @@ async function doSubmit(){
     if(!d1.success)throw new Error(d1.error||'EFRIS submission failed');
     sh('rCard');tx('rFDN',d1.fdn||'—');tx('rAF',d1.antifakeCode||'—');
     steps[4].st='act';setProg(steps);
-    await saveMgr(d1.fdn,d1.qrCode,d1.antifakeCode);
+    await saveMgr(d1.fdn,d1.qrCode,d1.antifakeCode,d1.deviceNo,d1.issuedDate,d1.invoiceId);
     steps[4].st='don';setProg(steps);
   }catch(err){
     console.error(err); showErr(err.message);
@@ -649,14 +847,14 @@ async function doSubmit(){
   btn.disabled=false;btn.innerHTML='📤 Submit to URA EFRIS';
 }
 
-async function saveMgr(fdn,qrCode,antifakeCode){
+async function saveMgr(fdn,qrCode,antifakeCode,deviceNo,issuedDate,invoiceId){
   const ep=CFG.managerEndpoint||MGR_EP, tk=CFG.accessToken||MGR_TK;
-  if(!ep||!tk||!DKEY){ ht('mgrSave','<div class="al aw">⚠ FDN received but Manager auto-save missing. FDN: <strong>'+fdn+'</strong></div>'); return; }
+  if(!ep||!tk||!DKEY){ ht('mgrSave','<div class="al aw">&#9888; FDN received but Manager auto-save missing. FDN: <strong>'+fdn+'</strong></div>'); return; }
   try{
-    const r=await fetch(RELAY+'/api/efris/save-to-manager',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({managerEndpoint:ep,accessToken:tk,documentKey:DKEY,efrisData:{fdn,qrCode,antifakeCode}})});
+    const r=await fetch(RELAY+'/api/efris/save-to-manager',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({managerEndpoint:ep,accessToken:tk,documentKey:DKEY,efrisData:{fdn,qrCode,antifakeCode,deviceNo,issuedDate,invoiceId}})});
     const d=await r.json();
-    ht('mgrSave',d.success?'<div class="st ss">✅ EFRIS data saved to Manager.io</div>':'<div class="al aw">⚠ FDN=<strong>'+fdn+'</strong> received but Manager save failed.<br>'+(d.error||'')+'</div>');
-  }catch(e){ ht('mgrSave','<div class="al aw">⚠ FDN: <strong>'+fdn+'</strong> — note this down.</div>'); }
+    ht('mgrSave',d.success?'<div class="st ss">&#10003; EFRIS data saved to Manager.io</div>':'<div class="al aw">&#9888; FDN=<strong>'+fdn+'</strong> received but Manager save failed.<br>'+(d.error||'')+'</div>');
+  }catch(e){ ht('mgrSave','<div class="al aw">&#9888; FDN: <strong>'+fdn+'</strong> — note this down.</div>'); }
 }
 
 function showErr(msg){
@@ -667,9 +865,189 @@ function showErr(msg){
   if(hint)ht('errHint','<div class="al ai">'+hint[1]+'</div>');else hd('errHint');
 }
 function retry(){hd('errCard');doSubmit();}
-function openVerify(){
-  const fdn=gvi('fdnQ');if(!fdn){alert('Enter an FDN first');return;}
-  window.open((CFG.sandbox?'https://efristest.ura.go.ug':'https://efris.ura.go.ug')+'/efrissite/receipts/verify?fdn='+encodeURIComponent(fdn),'_blank');
+
+// ── Credit Note ───────────────────────────────────────────────
+function openCreditNoteModal(){
+  if(!INV){alert('No invoice loaded');return;}
+  const fdn=$('exFDN')?$('exFDN').textContent.trim():'';
+  if(!fdn){alert('No FDN found — this receipt has not been submitted to EFRIS yet');return;}
+  ht('cnOrigFDN',fdn);
+  sv('cnReasonCode',''); sv('cnReasonDetail','');
+  sv('cnOrigRef',INV.Reference||INV.Code||'');
+  $('cnModal').style.display='';
+}
+function closeCnModal(){ $('cnModal').style.display='none'; }
+function updateCnReason(){
+  const v=gvi('cnReasonCode');
+  if(v==='Other') $('cnReasonDetail').placeholder='Please describe the reason…';
+  else $('cnReasonDetail').placeholder='Additional details (optional)…';
+}
+async function doCreditNote(){
+  const fdn=$('exFDN')?$('exFDN').textContent.trim():'';
+  const reasonCode=gvi('cnReasonCode');
+  const reasonDetail=(gvi('cnReasonDetail')||'').trim();
+  if(!reasonCode){alert('Please select a reason for the credit note');return;}
+  const reason=reasonCode+(reasonDetail?' — '+reasonDetail:'');
+  closeCnModal();
+  const btn=$('btnSub'); btn.disabled=true;
+  hd('rCard');hd('errCard');
+  const steps=[
+    {tx:'Submitting credit note to URA EFRIS',st:'act'},
+    {tx:'Creating credit note in Manager.io',st:'pnd'},
+    {tx:'Saving FDN to Manager.io',st:'pnd'}
+  ];
+  setProg(steps);
+  try{
+    // Step 1: Submit credit note to EFRIS
+    const inv=buildInv({isRefund:true,originalFDN:fdn,creditNoteReason:reason});
+    const r1=await fetch(RELAY+'/api/efris/submit-invoice',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({invoice:inv,config:{tin:CFG.tin,deviceNo:CFG.deviceNo,efrisPassword:CFG.efrisPassword,mode:CFG.sandbox?'sandbox':'production',businessName:CFG.legalName,tradeName:CFG.tradeName,businessAddress:CFG.address,brn:CFG.brn,phone:CFG.phone,email:CFG.email,vatRegistered:CFG.vatReg}})});
+    const d1=await r1.json();
+    if(!d1.success)throw new Error(d1.error||'Credit note submission failed');
+    steps[0].st='don'; steps[1].st='act'; setProg(steps);
+    sh('rCard');
+    ht('rFDN','<span style="color:#c62828;">&#8617; CREDIT NOTE</span> '+esc(d1.fdn||'—'));
+    tx('rAF',d1.antifakeCode||'—');
+    // Step 2: Create credit note record in Manager
+    const ep=CFG.managerEndpoint||MGR_EP, tk=CFG.accessToken||MGR_TK;
+    let cnKey=null;
+    if(ep&&tk&&DKEY){
+      try{
+        const cr=await fetch(RELAY+'/api/manager/create-credit-note',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({managerEndpoint:ep,accessToken:tk,originalKey:DKEY,reason,efrisFdn:d1.fdn,efrisInvoiceId:d1.invoiceId||''})});
+        const cd=await cr.json();
+        cnKey=cd.key;
+        if(cd.success) ht('mgrSave','<div class="st ss">&#10003; Credit note created in Manager (ref: CN-'+esc(INV.Reference||'')+')</div>');
+        else ht('mgrSave','<div class="al ai">&#9888; Manager credit note skipped: '+esc(cd.error||'unknown')+'</div>');
+      }catch(e){ ht('mgrSave','<div class="al ai">&#9888; Manager credit note: network error</div>'); }
+    }
+    steps[1].st='don'; steps[2].st='act'; setProg(steps);
+    // Step 3: Save FDN to the original invoice record in Manager (marks it as credit-noted)
+    await saveMgr(d1.fdn,d1.qrCode,d1.antifakeCode,d1.deviceNo,d1.issuedDate,d1.invoiceId||'');
+    steps[2].st='don'; setProg(steps);
+  }catch(err){
+    console.error(err);showErr('Credit Note: '+err.message);
+    steps.forEach(s=>{if(s.st==='act')s.st='err';});setProg(steps);
+  }
+  btn.disabled=false;
+}
+
+// ── Payment Ways ──────────────────────────────────────────────
+const PAY_MODES=[['101','Cash'],['102','Credit'],['103','Debit Card'],['104','Mobile Money'],['105','Cheque'],['106','Bank Transfer']];
+let _payWays=[{mode:'101',amount:''}];
+
+function renderPayWays(){
+  const el=$('payWaysList'); if(!el)return;
+  const fx=parseFloat(gvi('fxVal')||'1')||1;
+  const total=(INV?parseFloat(INV.Total||0):0)*fx;
+  const totalPaid=_payWays.reduce((s,pw)=>s+(parseFloat(pw.amount)||0),0);
+  const remaining=Math.round((total-totalPaid)*100)/100;
+  // Only rebuild rows if count changed — otherwise just update balance to avoid
+  // destroying inputs mid-typing (which loses cursor position)
+  const rows=el.querySelectorAll('.pw-row');
+  if(rows.length!==_payWays.length){
+    let h='';
+    _payWays.forEach((pw,i)=>{
+      const opts=PAY_MODES.map(([v,n])=>'<option value="'+v+'"'+(pw.mode===v?' selected':'')+'>'+n+'</option>').join('');
+      h+='<div class="pw-row" style="display:flex;gap:5px;align-items:center;margin-bottom:4px;" data-idx="'+i+'">'
+        +'<select style="flex:1;font-size:11px;" onchange="_payWays['+i+'].mode=this.value">'+opts+'</select>'
+        +'<input type="number" style="width:110px;font-size:12px;padding:4px 6px;" placeholder="Amount (blank=full)" value="'+pw.amount+'" onchange="_payWays['+i+'].amount=this.value;updatePayBalance()"/>'
+        +(_payWays.length>1?'<button onclick="_payWays.splice('+i+',1);renderPayWays()" style="background:none;border:none;color:#c62828;cursor:pointer;font-size:15px;line-height:1;">✕</button>':'<span style="width:20px;display:inline-block;"></span>')
+        +'</div>';
+    });
+    el.innerHTML=h+'<div id="pwBalance"></div>';
+  }
+  updatePayBalance();
+}
+function updatePayBalance(){
+  const b=$('pwBalance'); if(!b)return;
+  const fx=parseFloat(gvi('fxVal')||'1')||1;
+  const total=(INV?parseFloat(INV.Total||0):0)*fx;
+  const totalPaid=_payWays.reduce((s,pw)=>s+(parseFloat(pw.amount)||0),0);
+  const remaining=Math.round((total-totalPaid)*100)/100;
+  if(remaining>0.01&&_payWays.some(pw=>pw.amount))
+    b.innerHTML='<div style="font-size:11px;color:#e65100;margin-top:3px;padding:4px 6px;background:#fff3e0;border-radius:4px;">Balance remaining: <strong>'+remaining.toLocaleString('en-UG',{maximumFractionDigits:2})+'</strong> (unpaid — will show on receipt as Credit)</div>';
+  else b.innerHTML='';
+}
+
+function addPayWay(){
+  const total=INV?parseFloat(INV.Total||0):0;
+  const paid=_payWays.reduce((s,pw)=>s+(parseFloat(pw.amount)||0),0);
+  const rem=Math.max(0,Math.round((total-paid)*100)/100);
+  _payWays.push({mode:'101',amount:rem>0?String(rem):''});
+  renderPayWays();
+}
+
+function getPayWays(){
+  const total=INV?parseFloat(INV.Total||0):0;
+  const fx=parseFloat(gvi('fxVal')||'1')||1;
+  const grossTotal=Math.round(total*fx*100)/100;
+  const ways=_payWays.map((pw,i)=>({
+    mode:pw.mode||'101',
+    amount:pw.amount?parseFloat(pw.amount)||0:(i===0?grossTotal:0)
+  })).filter(pw=>pw.amount>0);
+  if(!ways.length) return [{mode:'101',amount:grossTotal}];
+  // If partial payment, add remaining balance as Credit (102)
+  const paid=ways.reduce((s,pw)=>s+pw.amount,0);
+  const rem=Math.round((grossTotal-paid)*100)/100;
+  if(rem>0.01) ways.push({mode:'102',amount:rem});
+  return ways;
+}
+
+async function doVerifyTin(){
+  const tin=gvi('tinQ'); if(!tin){ht('tinResult','<div class="al aw">Enter a TIN first</div>');return;}
+  if(!CFG.tin){ht('tinResult','<div class="al aw">Complete EFRIS setup in Settings first</div>');return;}
+  ht('tinResult','<div class="al ai">Querying URA EFRIS…</div>');
+  try{
+    const r=await fetch(RELAY+'/api/efris/verify-tin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({buyerTin:tin,config:{tin:CFG.tin,deviceNo:CFG.deviceNo,efrisPassword:CFG.efrisPassword,mode:CFG.sandbox?'sandbox':'production'}})});
+    const d=await r.json();
+    if(d.success){
+      const tp=d.taxpayer||{};
+      const name=d.taxpayerName||tp.taxpayerName||tp.taxpayerLegalName||tp.legalName||tp.entityName||tp.taxPayerName||tp.businessName||tp.name||'';
+      const addr=tp.address||tp.businessAddress||'';
+      ht('tinResult','<div class="al as" style="font-size:12px;"><strong>✅ Valid TIN</strong><br><b>Name:</b> '+(name||'—')+'<br><b>TIN:</b> '+tin+(addr?'<br><b>Address:</b> '+addr:'')+'</div>');
+      sv('cTIN',tin);
+    } else {
+      ht('tinResult','<div class="al aw">❌ '+d.error+'</div>');
+    }
+  }catch(e){ht('tinResult','<div class="al aw">Network error: '+e.message+'</div>');}
+}
+
+async function doPreview(){
+  if(!INV){ht('prevContent','<div class="al aw">Open an invoice first</div>');$('prevModal').style.display='';return;}
+  const inv=buildInv();
+  try{
+    const r=await fetch(RELAY+'/api/efris/preview-invoice',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({invoice:inv,config:{tin:CFG.tin,deviceNo:CFG.deviceNo,vatRegistered:CFG.vatReg,businessName:CFG.legalName,tradeName:CFG.tradeName,businessAddress:CFG.address,brn:CFG.brn,phone:CFG.phone,email:CFG.email}})});
+    const d=await r.json();
+    if(!d.success){ht('prevContent','<div class="al aw">Preview error: '+esc(d.error)+'</div>');$('prevModal').style.display='';return;}
+    const p=d.payload; const bi=p.basicInformation||{}; const sm=p.summary||{};
+    const modeNames={'101':'Cash','102':'Credit','103':'Debit Card','104':'Mobile Money','105':'Cheque','106':'Bank Transfer'};
+    const payStr=(p.payWay||[]).map(pw=>(modeNames[pw.paymentMode]||pw.paymentMode)+' '+pw.paymentAmount).join(' + ');
+    let h='<h3 style="margin:0 0 12px;color:#1b5e20;font-size:14px;">&#128065; EFRIS T109 Preview</h3>';
+    h+='<div style="background:#f5f5f5;border-radius:6px;padding:10px;margin-bottom:12px;display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;font-size:11px;">';
+    h+='<div><b>Document Type</b><br>'+(bi.invoiceKind==='1'?'Tax Invoice':'e-Receipt (Non-VAT)')+'</div>';
+    h+='<div><b>Currency</b><br>'+(bi.currency||'UGX')+'</div>';
+    h+='<div><b>Payment</b><br>'+(payStr||'—')+'</div>';
+    h+='<div><b>Gross Amount</b><br>'+(sm.grossAmount||'—')+'</div>';
+    h+='<div><b>Tax Amount</b><br>'+(sm.taxAmount||'0.00')+'</div>';
+    h+='<div><b>Net Amount</b><br>'+(sm.netAmount||'—')+'</div>';
+    h+='</div>';
+    h+='<table style="width:100%;border-collapse:collapse;font-size:11px;margin-bottom:12px;">';
+    h+='<tr style="background:#e8f5e9;"><th style="padding:5px;text-align:left;">Item</th><th style="padding:5px;text-align:left;">Code</th><th style="padding:5px;text-align:right;">Qty</th><th style="padding:5px;text-align:right;">Unit Price</th><th style="padding:5px;text-align:right;">Total</th><th style="padding:5px;text-align:center;">Rule</th></tr>';
+    (p.goodsDetails||[]).forEach((g,i)=>{
+      h+='<tr style="border-top:1px solid #eee;background:'+(i%2?'#fafafa':'#fff')+';">';
+      h+='<td style="padding:4px 5px;">'+esc(g.item)+'</td>';
+      h+='<td style="padding:4px 5px;font-family:monospace;font-size:10px;">'+esc(g.itemCode)+'</td>';
+      h+='<td style="padding:4px 5px;text-align:right;">'+g.qty+'</td>';
+      h+='<td style="padding:4px 5px;text-align:right;">'+g.unitPrice+'</td>';
+      h+='<td style="padding:4px 5px;text-align:right;">'+g.total+'</td>';
+      h+='<td style="padding:4px 5px;text-align:center;font-size:10px;color:#1565c0;">'+g.taxRule+'</td>';
+      h+='</tr>';
+    });
+    h+='</table>';
+    h+='<div style="font-size:10px;color:#888;border-top:1px solid #eee;padding-top:8px;">This is a preview only — nothing has been submitted to URA.</div>';
+    ht('prevContent',h);
+    $('prevModal').style.display='';
+  }catch(e){ht('prevContent','<div class="al aw">Preview error: '+e.message+'</div>');$('prevModal').style.display='';}
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -759,6 +1137,7 @@ function gGoStep(n){
   if(n===3) gBuildClassSelect();
   if(n===4) gBuildCommoditySelect();
   if(n===5 && efris) gBuildDetailsSummary();
+  if(n===5) gLoadAccounts();
   // Show/hide Back button in step 5
   const step5=document.querySelector('#gstep5 .row button.bo');
   if(step5) step5.style.display=efris?'':'none';
@@ -900,6 +1279,50 @@ function gUomInput(v){
 
 function gPickUom(val){ $('gFldUom').value=val; $('gUomDd').style.display='none'; gAutoEfrisUom(val); }
 
+let _acctLoaded=false, _divsLoaded=false;
+
+function gOnTypeChange(){
+  const typeVal=$('gFldType')?$('gFldType').value:'Service';
+  const isGoods=typeVal==='Goods';
+  const vw=$('gValuationWrap'); if(vw) vw.style.display=isGoods?'':'none';
+  const sw=$('gStockWrap'); if(sw) sw.style.display=isGoods?'':'none';
+  gLoadAccounts();
+}
+
+async function gLoadAccounts(){
+  const wrap=$('gAcctWrap'); if(!wrap)return;
+  // Show account/division section for both Goods and Services
+  wrap.style.display='';
+  const typeVal=$('gFldType')?$('gFldType').value:'Service';
+  const isGoods=typeVal==='Goods';
+  const vw=$('gValuationWrap'); if(vw) vw.style.display=isGoods?'':'none';
+  const sw=$('gStockWrap'); if(sw) sw.style.display=isGoods?'':'none';
+  const ep=CFG.managerEndpoint||MGR_EP, tk=CFG.accessToken||MGR_TK;
+  if(!ep||!tk)return;
+  if(!_acctLoaded){
+    try{
+      const r=await fetch(RELAY+'/api/manager/accounts?ep='+encodeURIComponent(ep)+'&tk='+encodeURIComponent(tk));
+      const d=await r.json();
+      if(d.success&&d.accounts.length){
+        const opts='<option value="">— Select account —</option>'+d.accounts.map(a=>'<option value="'+esc(a.key)+'">'+esc(a.name)+'</option>').join('');
+        ['gFldWhenSold','gFldWhenPurchased'].forEach(id=>{ const el=$(id); if(el) el.innerHTML=opts; });
+        _acctLoaded=true;
+      }
+    }catch(e){}
+  }
+  if(!_divsLoaded){
+    try{
+      const r2=await fetch(RELAY+'/api/manager/divisions?ep='+encodeURIComponent(ep)+'&tk='+encodeURIComponent(tk));
+      const d2=await r2.json();
+      if(d2.success){
+        const divOpts='<option value="">— None —</option>'+(d2.divisions||[]).map(d=>'<option value="'+esc(d.key)+'">'+esc(d.name)+'</option>').join('');
+        ['gFldDivision','gFldSalesDivision'].forEach(id=>{ const el=$(id); if(el) el.innerHTML=divOpts; });
+        _divsLoaded=true;
+      }
+    }catch(e){}
+  }
+}
+
 const _EFRIS_UOM_MAP = {
   'per person':'PP','per pax':'PP','per adult':'PP','per child':'PP','per guest':'PP','per infant':'PP','per participant':'PP','per student':'PP',
   'per night':'PN2','per day':'PD2','per hour':'PH2','per week':'PW2','per month':'PM2','per year':'PY2','per annum':'PY2',
@@ -1003,6 +1426,12 @@ function gBuildItemFromForm(){
     efrisUom:($('gFldEfrisUom')?$('gFldEfrisUom').value.trim().toUpperCase():''),
     type:$('gFldType').value, vat:CFG.vatReg?$('gFldVat').value:'Non-VAT',
     excise:$('gFldExcise').value,
+    whenSold:$('gFldWhenSold')?$('gFldWhenSold').value:'',
+    whenPurchased:$('gFldWhenPurchased')?$('gFldWhenPurchased').value:'',
+    division:$('gFldDivision')?$('gFldDivision').value:'',
+    salesDivision:$('gFldSalesDivision')?$('gFldSalesDivision').value:'',
+    costMethod:$('gFldCostMethod')?$('gFldCostMethod').value:'',
+    initQty:$('gFldInitQty')?$('gFldInitQty').value:'',
     remarks:$('gFldRemarks')?$('gFldRemarks').value.trim():''
   });
   if(!item.id) item.id=Date.now()+'_'+Math.random().toString(36).slice(2);
@@ -1195,8 +1624,38 @@ function gEditItem(i){
   const vatEl=$('gFldVat'); if(vatEl) vatEl.value=it.vat||'Standard';
   const excEl=$('gFldExcise'); if(excEl) excEl.value=it.excise||'No';
   const remEl=$('gFldRemarks'); if(remEl) remEl.value=it.remarks||'';
+  if($('gFldWhenSold')) $('gFldWhenSold').value=it.whenSold||'';
+  if($('gFldWhenPurchased')) $('gFldWhenPurchased').value=it.whenPurchased||'';
+  if($('gFldDivision')) $('gFldDivision').value=it.division||'';
+  if($('gFldSalesDivision')) $('gFldSalesDivision').value=it.salesDivision||'';
+  if($('gFldCostMethod')) $('gFldCostMethod').value=it.costMethod!=null?String(it.costMethod):'';
+  if($('gFldInitQty')) $('gFldInitQty').value='';
+  gOnTypeChange();
   const s=$('gSyncStatus');
   if(s) s.innerHTML='<div class="al ai">&#9998; Editing <strong>'+esc(it.name)+'</strong> — update fields then click Sync.</div>';
+}
+
+async function gSetInitialStock(){
+  const item=gBuildItemFromForm(); if(!item)return;
+  const qty=parseFloat($('gFldInitQty')?$('gFldInitQty').value:'');
+  if(!qty||qty<=0){alert('Enter a quantity greater than 0');return;}
+  if(!item.managerId&&!gItems.find(i=>(i.code||'').toLowerCase()===(item.code||'').toLowerCase())?.managerId){
+    alert('Sync this item to Manager.io first, then set the stock quantity.');return;
+  }
+  const managerId=(gItems.find(i=>(i.code||'').toLowerCase()===(item.code||'').toLowerCase())||{}).managerId;
+  if(!managerId){alert('Manager item ID not found — sync to Manager first.');return;}
+  const ep=CFG.managerEndpoint,tk=CFG.accessToken;
+  const res=$('gStockResult');
+  if(res) res.innerHTML='<span style="color:var(--gray);">Setting stock…</span>';
+  try{
+    const r=await fetch(RELAY+'/api/manager/inventory-adjust',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({managerEndpoint:ep,accessToken:tk,itemKey:managerId,qty,description:'Initial stock entry via EFRIS Connect'})});
+    const d=await r.json();
+    if(res) res.innerHTML=d.success
+      ?'<span style="color:var(--g);">✅ Stock set to '+qty+'</span>'
+      :'<span style="color:#c62828;">❌ '+esc(d.error||'Failed')+'</span>';
+  }catch(e){
+    if(res) res.innerHTML='<span style="color:#c62828;">Network error: '+esc(e.message)+'</span>';
+  }
 }
 
 async function gRetrySyncMgr(i){
@@ -1240,11 +1699,14 @@ async function gLoadManagerItems(){
     const d=await r.json();
     if(!d.success){el.innerHTML='<div class="al ae">'+esc(d.error||'Failed')+'</div>';return;}
     if(!d.items||!d.items.length){el.innerHTML='<div class="al ai">No items found in Manager.io.</div>';return;}
-    // Match by code (if available) or name to detect already-imported items
-    const imported=new Set(gItems.map(i=>(i.code||i.name||'').toLowerCase()).filter(Boolean));
-    const key=i=>(i.code||i.name||'').toLowerCase();
-    const fresh=d.items.filter(i=>!imported.has(key(i)));
-    const already=d.items.filter(i=>imported.has(key(i)));
+    // Match by code AND name separately to catch mismatches between the two sets
+    const importedCodes=new Set(gItems.map(i=>(i.code||'').toLowerCase()).filter(Boolean));
+    const importedNames=new Set(gItems.map(i=>(i.name||'').toLowerCase()).filter(Boolean));
+    const isImported=i=>
+      (i.code&&importedCodes.has(i.code.toLowerCase()))||
+      (i.name&&importedNames.has(i.name.toLowerCase()));
+    const fresh=d.items.filter(i=>!isImported(i));
+    const already=d.items.filter(i=>isImported(i));
     let h='';
     if(already.length) h+='<div class="al as" style="margin-bottom:6px;">'+already.length+' item(s) already configured: '+already.map(i=>esc(i.code||i.name)).join(', ')+'</div>';
     if(!fresh.length&&already.length){el.innerHTML=h+'<div class="al ai">All Manager items are already imported.</div>';return;}
@@ -1278,16 +1740,21 @@ async function gImportManagerItem(idx){
     if(d.success) detail=d.item;
   }catch(e){}
   gSwSub('cfg');
-  // Restore commodity context from existing gItems entry if available
-  const existingItem = gItems.find(x=>(x.code||'').toLowerCase()===(i.code||'').toLowerCase());
-  const alreadyConfigured = !!(i.comCode || (existingItem||{}).comCode);
+  // Find existing gItems entry by code OR name
+  const existingItem = gItems.find(x=>
+    (x.code&&i.code&&x.code.toLowerCase()===i.code.toLowerCase())||
+    (x.name&&i.name&&x.name.toLowerCase()===i.name.toLowerCase())
+  );
+  const alreadyConfigured = !!(existingItem&&existingItem.comCode);
   if(alreadyConfigured && existingItem){
     if(existingItem.comCode) gCOM={k:existingItem.comCode, n:existingItem.comName||''};
     if(existingItem.segCode) gSEG={k:existingItem.segCode, n:existingItem.segment||''};
     if(existingItem.famCode) gFAM={k:existingItem.famCode, n:existingItem.family||''};
     if(existingItem.clsCode) gCLS={k:existingItem.clsCode, n:existingItem.cls||''};
   }
-  if(CFG.efrisEnabled===false || alreadyConfigured){ gGoStep(5); } else { gGoStep(1); }
+  // Always jump straight to step 5 — user can use "Choose category" button to change
+  if(CFG.efrisEnabled===false || alreadyConfigured){ gGoStep(5); }
+  else { gGoStep(5); } // Go to step 5 regardless; commodity wizard is accessible via button
   setTimeout(()=>{
     const code=(detail&&detail.code)||i.code||'';
     const name=(detail&&detail.name)||i.name||'';
@@ -1302,6 +1769,12 @@ async function gImportManagerItem(idx){
     if(remarks){ const rEl=$('gFldRemarks'); if(rEl) rEl.value=remarks; }
     const typeEl=$('gFldType');
     if(typeEl) typeEl.value=i.type==='Goods'?'Goods':'Service';
+    if(detail&&detail.division&&$('gFldDivision')) $('gFldDivision').value=detail.division;
+    if(detail&&detail.salesDivision&&$('gFldSalesDivision')) $('gFldSalesDivision').value=detail.salesDivision;
+    if(detail&&detail.costMethod!=null&&$('gFldCostMethod')) $('gFldCostMethod').value=String(detail.costMethod);
+    if(detail&&detail.whenSold&&$('gFldWhenSold')) $('gFldWhenSold').value=detail.whenSold;
+    if(detail&&detail.whenPurchased&&$('gFldWhenPurchased')) $('gFldWhenPurchased').value=detail.whenPurchased;
+    gOnTypeChange();
     window._importedManagerKey=i.key;
   },50);
   const priceNote=detail&&detail.hasSalesUnitPrice?' · Price: '+(detail.salesUnitPrice||0).toLocaleString():'';
@@ -1327,10 +1800,10 @@ function init(){
       // Non-EFRIS users go straight to the Goods configurator — no invoice flow
       showScr('sMain'); showT('tGds',$('tabGds'));
     } else if(readParams()){
-      loadInv(DKEY);
+      _lastInvKey=DKEY; loadInv(DKEY);
     } else {
       setTimeout(()=>{
-        if(!INV&&!DKEY){
+        if(!INV && !_lastInvKey && !_invDebounce){
           showScr('sNone'); loadList();
           try{
             var dbg=$('ctxDbg');
@@ -1348,6 +1821,256 @@ function init(){
 }
 init();
 gLoadUnits(); // preload UOM list in background
+
+// ── Invoice list search ────────────────────────
+function filterPickList(q){
+  q=(q||'').toLowerCase();
+  document.querySelectorAll('#pickList .pick-row').forEach(el=>{
+    el.style.display=(q&&!el.textContent.toLowerCase().includes(q))?'none':'';
+  });
+}
+
+// ── Create Receipt ─────────────────────────────
+let _crCustType='b2c', _crItems=[], _crLines=[{itemKey:'',description:'',qty:1,unitPrice:''}];
+
+function showCreate(){
+  if(!CFG.tin){alert('Complete Settings first (TIN, Device No, EFRIS Password)');return;}
+  if(!(CFG.managerEndpoint||MGR_EP)){alert('Manager endpoint not connected — finish Settings first');return;}
+  _crCustType='b2c'; _crLines=[{itemKey:'',description:'',qty:1,unitPrice:''}];
+  document.querySelectorAll('[data-crtype]').forEach(b=>b.classList.toggle('on',b.dataset.crtype==='b2c'));
+  document.querySelectorAll('#sCreate .cust-fields').forEach(d=>d.style.display='none');
+  const today=new Date().toISOString().slice(0,10);
+  sv('crDate',today);
+  sv('crRef','REC-'+today.replace(/-/g,'').slice(2)+'-'+(Math.floor(Math.random()*900)+100));
+  sv('crNotes',''); sv('crFxRate','1');
+  ht('crProg',''); ht('crResult','');
+  renderCrLines();
+  showScr('sCreate');
+  loadCrItems();
+}
+
+function setCrCust(t){
+  _crCustType=t;
+  document.querySelectorAll('[data-crtype]').forEach(b=>b.classList.toggle('on',b.dataset.crtype===t));
+  const map={b2b:'crCustB2b',b2g:'crCustB2g',foreign:'crCustForeign'};
+  document.querySelectorAll('#sCreate .cust-fields').forEach(d=>d.style.display='none');
+  const show=map[t]; if(show){const el=$(show);if(el)el.style.display='';}
+}
+
+async function loadCrItems(){
+  const ep=CFG.managerEndpoint||MGR_EP, tk=CFG.accessToken||MGR_TK;
+  if(!ep||!tk) return;
+  const lbl=$('crItemsLbl'); if(lbl) lbl.textContent='Items / Services (loading…)';
+  try{
+    const r=await fetch(RELAY+'/api/manager/items-list?ep='+encodeURIComponent(ep)+'&tk='+encodeURIComponent(tk));
+    const d=await r.json();
+    _crItems=d.success?(d.items||[]).filter(x=>x.key&&x.name):[];
+    if(lbl) lbl.textContent='Items / Services ('+_crItems.length+' loaded)';
+    renderCrLines();
+  }catch(e){ console.error('loadCrItems failed:',e); if(lbl) lbl.textContent='Items / Services (load failed)'; }
+}
+
+function renderCrLines(){
+  const el=$('crLinesList'); if(!el) return;
+  let h='';
+  _crLines.forEach((ln,i)=>{
+    const total=Math.round((parseFloat(ln.qty)||0)*(parseFloat(ln.unitPrice)||0));
+    h+='<div style="margin-bottom:4px;">'
+      +'<div style="display:flex;gap:4px;align-items:center;">'
+      +'<div style="flex:2;min-width:100px;position:relative;">'
+      +'<input id="crDesc'+i+'" style="width:100%;box-sizing:border-box;font-size:11px;" placeholder="Item / service description" value="'+esc(ln.description)+'" '
+      +'oninput="crItemSearch('+i+',this.value)" onfocus="crItemSearch('+i+',this.value)" onblur="setTimeout(()=>crHideSug('+i+'),160)"/>'
+      +'<div id="crSug'+i+'" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:200;background:white;border:1px solid var(--bdr);border-radius:4px;max-height:160px;overflow-y:auto;box-shadow:0 3px 8px rgba(0,0,0,.12);font-size:11px;"></div>'
+      +'</div>'
+      +'<input type="number" style="width:48px;font-size:11px;text-align:right;" placeholder="Qty" value="'+esc(String(ln.qty))+'" min="0.001" '
+      +'oninput="_crLines['+i+'].qty=this.value;renderCrTotal()"/>'
+      +'<input id="crUp'+i+'" type="number" style="width:78px;font-size:11px;text-align:right;" placeholder="Price" value="'+esc(String(ln.unitPrice||''))+'" min="0" '
+      +'oninput="_crLines['+i+'].unitPrice=this.value;renderCrTotal()"/>'
+      +'<span style="width:64px;text-align:right;font-size:11px;color:var(--gray);">'+(total?total.toLocaleString('en-UG',{maximumFractionDigits:0}):'')+'</span>'
+      +(_crLines.length>1?'<button onclick="_crLines.splice('+i+',1);renderCrLines()" style="background:none;border:none;color:#c62828;cursor:pointer;font-size:14px;padding:0 2px;">&#10005;</button>':'<span style="width:18px;"></span>')
+      +'</div></div>';
+  });
+  h+='<div id="crTotalRow" style="text-align:right;font-size:13px;font-weight:600;padding:4px 0;border-top:1px solid var(--bdr);margin-top:2px;"></div>';
+  el.innerHTML=h;
+  renderCrTotal();
+}
+
+function crItemSearch(lineIdx, v){
+  _crLines[lineIdx].description=v; _crLines[lineIdx].itemKey='';
+  const sug=$('crSug'+lineIdx); if(!sug) return;
+  if(!v.trim()||!_crItems.length){sug.style.display='none';renderCrTotal();return;}
+  const q=v.toLowerCase();
+  const hits=_crItems.filter(x=>x.name.toLowerCase().includes(q)||(x.code&&x.code.toLowerCase().includes(q))).slice(0,10);
+  if(!hits.length){sug.style.display='none';renderCrTotal();return;}
+  sug.innerHTML=hits.map(x=>{
+    const label=esc((x.code?'['+x.code+'] ':'')+x.name);
+    const pr=x.price?'<span style="float:right;color:var(--gray);">'+Number(x.price).toLocaleString('en-UG',{maximumFractionDigits:0})+'</span>':'';
+    const idx=_crItems.indexOf(x);
+    return '<div style="padding:5px 8px;cursor:pointer;border-bottom:1px solid #f5f5f5;" onmousedown="crSelectItem('+lineIdx+','+idx+')">'+label+pr+'</div>';
+  }).join('');
+  sug.style.display='block';
+  renderCrTotal();
+}
+
+function crSelectItem(lineIdx,itemIdx){
+  const it=_crItems[itemIdx]; if(!it) return;
+  _crLines[lineIdx].itemKey=it.key;
+  _crLines[lineIdx].description=it.name;
+  if(it.price){ _crLines[lineIdx].unitPrice=it.price; }
+  renderCrLines();
+  // Restore focus to next logical field (qty)
+  setTimeout(()=>{ const inputs=document.querySelectorAll('#crLinesList input[type="number"]'); if(inputs[lineIdx*2]) inputs[lineIdx*2].focus(); },50);
+}
+
+function crHideSug(i){ const s=$('crSug'+i); if(s)s.style.display='none'; }
+
+
+function addCrLine(){ _crLines.push({itemKey:'',description:'',qty:1,unitPrice:''}); renderCrLines(); }
+
+function renderCrTotal(){
+  const fx=parseFloat(gvi('crFxRate')||'1')||1;
+  const total=_crLines.reduce((s,l)=>s+(parseFloat(l.qty)||0)*(parseFloat(l.unitPrice)||0)*fx,0);
+  const el=$('crTotalRow');
+  if(el) el.textContent=total?'Total: UGX '+Math.round(total).toLocaleString('en-UG',{maximumFractionDigits:0}):'';
+}
+
+async function doCreateReceipt(managerOnly){
+  if(!CFG.tin) return alert('Complete Settings first');
+  const ep=CFG.managerEndpoint||MGR_EP, tk=CFG.accessToken||MGR_TK;
+  if(!ep||!tk) return alert('Manager endpoint not connected');
+  const lines=_crLines.filter(l=>(l.description||'').trim()||(l.itemKey||''));
+  if(!lines.length) return alert('Add at least one line item');
+  const date=gvi('crDate'); if(!date) return alert('Date is required');
+  const fx=parseFloat(gvi('crFxRate')||'1')||1;
+  let custName='',custTIN='',custDept='',passport='',nationality='';
+  if(_crCustType==='b2b'){custTIN=gvi('crCustTIN');custName=gvi('crCustName');}
+  else if(_crCustType==='b2g'){custTIN=gvi('crGovTIN');custDept=gvi('crGovDept');custName=custDept;}
+  else if(_crCustType==='foreign'){custName=gvi('crForeignName');passport=gvi('crPassport');nationality=gvi('crNationality');}
+  const receipt={
+    date, reference:gvi('crRef'),
+    lines:lines.map(l=>({itemKey:l.itemKey||'',description:(l.description||'').trim(),qty:parseFloat(l.qty)||1,unitPrice:(parseFloat(l.unitPrice)||0)*fx})),
+    description:gvi('crNotes')
+  };
+  const stepDefs=[{tx:'Creating receipt in Manager',st:'act'},{tx:'Loading receipt',st:'pnd'}];
+  if(!managerOnly){stepDefs.push({tx:'Submitting to URA EFRIS',st:'pnd'});stepDefs.push({tx:'Saving FDN to Manager',st:'pnd'});}
+  const steps=[...stepDefs];
+  const prog=()=>{const icons={pnd:'·',act:'…',don:'&#10003;',err:'&#10007;'};ht('crProg','<div class="pl">'+steps.map(s=>'<div class="ps '+s.st+'"><div class="pd">'+icons[s.st]+'</div><div>'+s.tx+'</div></div>').join('')+'</div>');};
+  ht('crResult',''); prog();
+  try{
+    // Step 1: Create receipt in Manager
+    const cr=await fetch(RELAY+'/api/manager/create-receipt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({managerEndpoint:ep,accessToken:tk,receipt})});
+    const crText=await cr.text();
+    let cd; try{ cd=JSON.parse(crText); }catch(_){
+      const isCF=crText.includes('Cloudflare')||crText.includes('<!DOCTYPE');
+      throw new Error(isCF
+        ? 'Cloudflare tunnel error — the tunnel may have dropped. Open the extension at http://localhost:3000/extension directly to bypass Cloudflare, OR restart the Cloudflare tunnel.'
+        : 'Server returned non-JSON. Make sure node server.js is running.\n'+crText.slice(0,200));
+    }
+    if(!cd.success) throw new Error('Manager: '+(cd.error||'Creation failed')+(cd.detail?'\nDetail: '+cd.detail.slice(0,200):''));
+    if(!cd.key) throw new Error('Receipt created but no key returned. Check Manager for a new receipt and submit from there.');
+    steps[0].st='don'; steps[1].st='act'; prog();
+    // Step 2: Load the new receipt
+    const lr=await fetch(RELAY+'/api/manager/invoice',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({managerEndpoint:ep,accessToken:tk,documentKey:cd.key})});
+    const ld2=await lr.json();
+    if(!ld2.success) throw new Error('Could not load new receipt: '+(ld2.error||'unknown error'));
+    INV=ld2.data; DKEY=cd.key; _lastInvKey=cd.key;
+    steps[1].st='don'; prog();
+    if(managerOnly){ renderInv(INV); showScr('sMain'); ht('crResult','<div class="al as">&#10003; Receipt created in Manager. You can now submit to EFRIS.</div>'); return; }
+    // Step 3: Submit to EFRIS
+    steps[2].st='act'; prog();
+    // Apply customer type so buildInv sees it
+    _custType=_crCustType;
+    if(_crCustType==='b2b'){ sv('cTIN',custTIN); if(custName) INV.CustomerName=custName; }
+    else if(_crCustType==='b2g'){ sv('cGovTIN',custTIN); sv('cGovDept',custDept); }
+    else if(_crCustType==='foreign'){ sv('cPassport',passport); sv('cNationality',nationality); sv('cForeignName',custName); }
+    const sr=await fetch(RELAY+'/api/efris/submit-invoice',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({invoice:buildInv(),config:{tin:CFG.tin,deviceNo:CFG.deviceNo,efrisPassword:CFG.efrisPassword,mode:CFG.sandbox?'sandbox':'production',businessName:CFG.legalName,tradeName:CFG.tradeName,businessAddress:CFG.address,brn:CFG.brn,phone:CFG.phone,email:CFG.email,vatRegistered:CFG.vatReg}})});
+    const sd=await sr.json();
+    if(!sd.success) throw new Error('EFRIS: '+sd.error);
+    steps[2].st='don'; steps[3].st='act'; prog();
+    // Step 4: Save FDN
+    await saveMgr(sd.fdn,sd.qrCode,sd.antifakeCode,sd.deviceNo,sd.issuedDate,sd.invoiceId||'');
+    steps[3].st='don'; prog();
+    renderInv(INV); showScr('sMain');
+    sh('rCard'); tx('rFDN',sd.fdn||'—'); tx('rAF',sd.antifakeCode||'—');
+  }catch(err){
+    console.error(err);
+    const s=steps.find(x=>x.st==='act'); if(s)s.st='err'; prog();
+    ht('crResult','<div class="al aw">'+esc(err.message)+'</div>');
+  }
+}
 </script>
+
+<!-- ── Create Receipt Screen ────────────────── -->
+<div class="scr" id="sCreate">
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+      <div class="ct" style="font-size:15px;">New Receipt</div>
+      <button class="btn bo bsm" onclick="showScr('sNone')">&#8592; Back</button>
+    </div>
+    <div style="display:flex;gap:8px;">
+      <div class="fg" style="flex:1;"><label>Date *</label><input type="date" id="crDate"/></div>
+      <div class="fg" style="flex:1;"><label>Reference</label><input id="crRef" placeholder="e.g. REC-001"/></div>
+    </div>
+    <div class="fg mt">
+      <label>Customer Type</label>
+      <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px;">
+        <button class="ctype-btn on" data-crtype="b2c" onclick="setCrCust('b2c')">Walk-in (B2C)</button>
+        <button class="ctype-btn" data-crtype="b2b" onclick="setCrCust('b2b')">Business (B2B)</button>
+        <button class="ctype-btn" data-crtype="b2g" onclick="setCrCust('b2g')">Government (B2G)</button>
+        <button class="ctype-btn" data-crtype="foreign" onclick="setCrCust('foreign')">Foreign</button>
+      </div>
+      <div id="crCustB2b" class="cust-fields" style="display:none;">
+        <div class="fg"><label>Business Name</label><input id="crCustName" placeholder="Company name"/></div>
+        <div class="fg"><label>TIN</label>
+          <div style="display:flex;gap:6px;"><input id="crCustTIN" placeholder="Customer TIN" style="flex:1;"/>
+          <button onclick="_verifyTinInto(gvi('crCustTIN'),'crTINRes')" class="btn bo bsm">Verify</button></div>
+          <div id="crTINRes" style="font-size:11px;margin-top:2px;"></div>
+        </div>
+      </div>
+      <div id="crCustB2g" class="cust-fields" style="display:none;">
+        <div class="fg"><label>Ministry / Department *</label><input id="crGovDept" placeholder="e.g. Ministry of Tourism"/></div>
+        <div class="fg"><label>Government TIN</label>
+          <div style="display:flex;gap:6px;"><input id="crGovTIN" placeholder="TIN (optional)" style="flex:1;"/>
+          <button onclick="_verifyTinInto(gvi('crGovTIN'),'crGovTINRes')" class="btn bo bsm">Verify</button></div>
+          <div id="crGovTINRes" style="font-size:11px;margin-top:2px;"></div>
+        </div>
+      </div>
+      <div id="crCustForeign" class="cust-fields" style="display:none;">
+        <div class="fg"><label>Full Name</label><input id="crForeignName" placeholder="Visitor name"/></div>
+        <div style="display:flex;gap:8px;">
+          <div class="fg" style="flex:1;"><label>Passport No.</label><input id="crPassport" placeholder="Passport number"/></div>
+          <div class="fg" style="flex:1;"><label>Nationality</label><input id="crNationality" placeholder="e.g. American"/></div>
+        </div>
+      </div>
+    </div>
+    <div class="fg mt">
+      <label id="crItemsLbl">Items / Services</label>
+      <div id="crLinesList"></div>
+      <button onclick="addCrLine()" class="btn bo bsm" style="margin-top:5px;">+ Add Line</button>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:8px;">
+      <div class="fg" style="flex:1;"><label>Payment Mode</label>
+        <select id="crPayMode">
+          <option value="101">Cash</option>
+          <option value="102">Credit</option>
+          <option value="103">Debit Card</option>
+          <option value="104">Mobile Money</option>
+          <option value="105">Cheque</option>
+          <option value="106">Bank Transfer</option>
+        </select>
+      </div>
+      <div class="fg" style="flex:1;"><label>FX Rate (if USD)</label>
+        <input id="crFxRate" type="number" placeholder="1" value="1" min="0.001"/>
+      </div>
+    </div>
+    <div class="fg"><label>Notes (optional)</label><input id="crNotes" placeholder="Remarks for the receipt"/></div>
+    <div id="crProg" style="margin-top:8px;"></div>
+    <div style="display:flex;gap:8px;margin-top:10px;">
+      <button class="btn bp" style="flex:2;" onclick="doCreateReceipt(false)">Create + Submit to EFRIS</button>
+      <button class="btn bo" style="flex:1;" onclick="doCreateReceipt(true)">Manager only</button>
+    </div>
+    <div id="crResult" style="margin-top:8px;"></div>
+  </div>
+</div>
 </body>
 </html>
