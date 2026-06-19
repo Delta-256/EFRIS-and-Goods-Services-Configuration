@@ -27,3 +27,5 @@ jobs:
           file: ./backend/Dockerfile
           push: true
           tags: twoservantsacr.azurecr.io/efris-backend:latest
+          build-args: |
+            EFRIS_PRIVATE_KEY=${{ secrets.EFRIS_PRIVATE_KEY }}

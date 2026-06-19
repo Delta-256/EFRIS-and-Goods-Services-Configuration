@@ -234,7 +234,7 @@ let _pemContentFromEnv = null;
 if (_pkEnv.trim().startsWith('-----BEGIN')) { _pemContentFromEnv = _pkEnv.replace(/\\n/g, '\n'); }
 const EFRIS_PRIVATE_KEY_PATHS = _pkEnv && !_pemContentFromEnv
   ? [_pkEnv]
-  : ['F:\\EFRIS_Keys\\efris_private_v2.pem', 'F:\\EFRIS_Keys\\efris_private.pem'];
+  : ['/app/keys/efris_private.pem', 'F:\\EFRIS_Keys\\efris_private_v2.pem', 'F:\\EFRIS_Keys\\efris_private.pem'];
 
 function loadPem(p) {
   if (_pemContentFromEnv) return _pemContentFromEnv;
