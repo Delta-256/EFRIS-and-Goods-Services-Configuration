@@ -805,6 +805,8 @@
       <div class="fg"><label>Address</label><input id="sAdr"/></div>
       <div class="fg"><label>Phone</label><input id="sPh"/></div>
       <div class="fg"><label>Email</label><input id="sEm"/></div>
+      <div class="fg"><label>Logo URL <span style="font-weight:400;color:var(--gray);">(optional)</span></label><input id="sLogo" placeholder="https://yourdomain.com/logo.png"/><div class="hint">Public image URL — shown on printed receipts. Leave blank to use business name initials.</div></div>
+      <div class="fg"><label>Default "Issued by" name <span style="font-weight:400;color:var(--gray);">(optional)</span></label><input id="sIssuedBy" placeholder="e.g. Sarah Nakato"/><div class="hint">Staff member name shown at the bottom of receipts.</div></div>
     </div>
     <div class="card"><div class="ct"><span class="ico-emoji">&#128272;</span><svg class="ico-svg" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg> EFRIS Credentials</div>
       <div class="fg"><label>TIN</label><input id="sTin"/></div>
@@ -946,6 +948,7 @@ function apCFG(){
   const b=$('mBadge');
   if(b){b.textContent=CFG.sandbox?'SANDBOX':'PRODUCTION';b.className='badge '+(CFG.sandbox?'bsb':'bprd');}
   sv('sLeg',CFG.legalName);sv('sTrd',CFG.tradeName);sv('sAdr',CFG.address);sv('sPh',CFG.phone);sv('sEm',CFG.email);
+  sv('sLogo',CFG.logoUrl||'');sv('sIssuedBy',CFG.issuedBy||'');
   sv('sTin',CFG.tin);sv('sDsn',CFG.deviceNo);sv('sPas',CFG.efrisPassword);sv('sBrn',CFG.brn);
   sv('sMgr',CFG.managerEndpoint);sv('sTok',CFG.accessToken);
   TG.vatReg=!!CFG.vatReg;TG.sandbox=CFG.sandbox!==false;TG.efrisEnabled=CFG.efrisEnabled!==false;
@@ -955,6 +958,7 @@ function apCFG(){
 }
 function saveSt(){
   CFG.legalName=gvi('sLeg');CFG.tradeName=gvi('sTrd');CFG.address=gvi('sAdr');CFG.phone=gvi('sPh');CFG.email=gvi('sEm');
+  CFG.logoUrl=gvi('sLogo');CFG.issuedBy=gvi('sIssuedBy');
   CFG.tin=gvi('sTin');CFG.deviceNo=gvi('sDsn');CFG.efrisPassword=gvi('sPas');CFG.brn=gvi('sBrn');
   CFG.managerEndpoint=gvi('sMgr').replace(/\/+$/,'');CFG.accessToken=gvi('sTok');
   CFG.vatReg=TG.vatReg;CFG.sandbox=TG.sandbox;CFG.efrisEnabled=TG.efrisEnabled;
@@ -1072,8 +1076,24 @@ function renderInv(inv){
   if(autoType!=='b2b'){sv('cTIN',''); ht('cTINResult','');}
   if(autoType!=='b2g'){sv('cGovTIN',''); sv('cGovDept',''); ht('cGovTINResult','');}
   if(autoType!=='foreign'){sv('cPassport',''); sv('cNationality',''); sv('cForeignName','');}
+  // Override with Manager custom fields if set
+  const mgrCustType=sGet('Customer Type','CustomerType');
+  if(mgrCustType){
+    const ctMap={'B2C':'b2c','B2B':'b2b','B2G':'b2g','Foreign':'foreign','b2c':'b2c','b2b':'b2b','b2g':'b2g','foreign':'foreign'};
+    const mapped=ctMap[mgrCustType.trim()];
+    if(mapped&&mapped!==autoType){
+      _custType=mapped;
+      document.querySelectorAll('.ctype-btn').forEach(b=>b.classList.toggle('on',b.dataset.type===mapped));
+      document.querySelectorAll('.cust-fields').forEach(d=>d.style.display='none');
+      const mf=$('cust-'+mapped); if(mf) mf.style.display='';
+    }
+  }
   hd('subProg'); hd('rCard'); hd('errCard');
-  _payWays=[{mode:'101',amount:''}]; renderPayWays();
+  // Pre-populate payment method from Manager custom field
+  const mgrPayMethod=sGet('Payment Method','PaymentMethod');
+  const pmCodeMap={'Cash':'101','Credit':'102','Debit Card':'103','Card':'103','Visa':'103','Mastercard':'103','Card (Visa/Mastercard)':'103','Mobile Money':'104','MTN Momo':'104','Airtel Pay':'104','Airtel Money':'104','Cheque':'105','Bank Transfer':'106','Bank':'106'};
+  const pmCode=mgrPayMethod?pmCodeMap[mgrPayMethod.trim()]||'101':'101';
+  _payWays=[{mode:pmCode,amount:''}]; renderPayWays();
   const fdn=(inv.CustomFields&&(inv.CustomFields['Fiscal Document Number']||inv.CustomFields['EFRIS FDN']))||'';
   if(fdn){sh('subDone');tx('exFDN',fdn);}else hd('subDone');
   const lines=inv.Lines||inv.Items||[];
