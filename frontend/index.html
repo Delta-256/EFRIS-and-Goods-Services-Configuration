@@ -185,7 +185,8 @@
     <div class="ob" id="ob4">
       <div class="al ai"><strong>Manager.io Connection</strong></div>
       <div class="al as">&#10003; Relay server is running &mdash; this page is served by it.</div>
-      <div class="fg"><label>Manager.io API Endpoint *</label><input id="o4a" value="http://localhost:8090/api2"/><div class="hint">The URL of your Manager.io server + <code>/api2</code>. Common: <code>http://localhost:8080/api2</code> (desktop) · <code>http://localhost:8090/api2</code> (Docker). Check Manager's address bar for the right host/port.</div></div>
+      <div class="fg"><label>Manager.io API Endpoint *</label><div style="display:flex;gap:6px;align-items:flex-start;"><input id="o4a" value="http://localhost:8090/api2" style="flex:1;"/><button type="button" class="btn bo bsm" onclick="detectManagerEndpoint()" id="detectBtn" style="white-space:nowrap;margin-top:1px;">&#128270; Auto-detect</button></div><div class="hint">Desktop: <code>http://localhost:8080/api2</code> or <code>http://localhost:8090/api2</code> &nbsp;|&nbsp; Server / Docker: <code>https://your-domain.com/api2</code> (use <strong>https:</strong> for remote servers). Click Auto-detect to find a local installation automatically.</div></div>
+      <div id="detectResult" style="font-size:12px;margin:-4px 0 6px;"></div>
       <div class="fg"><label>Access Token *</label><input id="o4b" placeholder="Paste your Manager API token here"/><div class="hint">In Manager: Settings → API Keys → Add Key → copy the token. ⚠ You only see the token once — copy it immediately.</div></div>
       <button class="btn bgld" onclick="testMgr('o4a','o4b','mgrR')">&#128279; Test Manager Connection</button>
       <div id="mgrR"></div>
@@ -751,10 +752,10 @@
       <div class="gs"><div class="gn">2</div><div class="gb">
         <h4>Get your Manager.io Endpoint URL</h4>
         <p>This is the address EFRISConnect uses to talk to Manager. Common values:<br>
-        <code>http://localhost:8080/api2</code> — Manager on the same computer<br>
-        <code>http://localhost:8090/api2</code> — Manager in Docker<br>
-        <code>http://YOUR-SERVER-IP:8080/api2</code> — Manager on a local server<br>
-        <em>💡 Open Manager, look at the address bar — use that hostname and port, add <code>/api2</code> at the end.</em></p>
+        <code>http://localhost:8080/api2</code> — Manager desktop (older versions)<br>
+        <code>http://localhost:8090/api2</code> — Manager desktop (newer) or Docker<br>
+        <code>https://your-domain.com/api2</code> — Manager Server Edition (always use <strong>https:</strong> for remote servers — http will redirect and fail)<br>
+        <em>💡 Not sure? Click <strong>Auto-detect</strong> in Settings to scan common local ports automatically.</em></p>
       </div></div>
 
       <div class="gs"><div class="gn">3</div><div class="gb">
@@ -1149,6 +1150,40 @@ function saveSt(){
   setTimeout(()=>hd('saveR'),3000);
 }
 function resetAll(){ if(!confirm('Reset all settings?'))return; localStorage.removeItem(SKEY); location.reload(); }
+
+async function detectManagerEndpoint(){
+  const btn=document.getElementById('detectBtn');
+  const res=document.getElementById('detectResult');
+  const tk=gvi('o4b');
+  btn.disabled=true; btn.textContent='⏳ Scanning…';
+  res.innerHTML='<span style="color:var(--gray)">Trying common local ports…</span>';
+  const candidates=[
+    'http://localhost:8080/api2',
+    'http://localhost:8090/api2',
+    'http://localhost:9090/api2',
+    'http://localhost:8888/api2',
+    'http://127.0.0.1:8080/api2',
+    'http://127.0.0.1:8090/api2',
+  ];
+  let found=null;
+  for(const ep of candidates){
+    try{
+      const r=await fetch(RELAY+'/api/manager/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({managerEndpoint:ep,accessToken:tk||'probe'})});
+      const d=await r.json();
+      // Accept if success OR if we got an auth error (means Manager is there but token wrong)
+      if(d.success||(d.error&&!d.error.includes('ECONNREFUSED')&&!d.error.includes('ENOTFOUND')&&!d.error.includes('timeout'))){
+        found=ep; break;
+      }
+    }catch(e){}
+  }
+  btn.disabled=false; btn.textContent='🔍 Auto-detect';
+  if(found){
+    document.getElementById('o4a').value=found;
+    res.innerHTML='<span style="color:var(--g)">✅ Found Manager at <strong>'+found+'</strong> — endpoint filled in.</span>';
+  } else {
+    res.innerHTML='<span style="color:var(--red)">No local Manager found. Enter your endpoint manually (e.g. <code>https://your-domain.com/api2</code> for server edition).</span>';
+  }
+}
 
 async function testMgr(epId,tkId,resultId){
   const ep=gvi(epId);const tk=gvi(tkId);
