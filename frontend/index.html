@@ -198,7 +198,7 @@
   <div class="tabs">
     <button class="tab on efris-only" id="tabSub" onclick="showT('tSub',this)"><span class="ico-emoji">&#128228;</span><svg class="ico-svg" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg> Submit</button>
     <button class="tab efris-only" id="tabStat" onclick="showT('tStat',this)"><span class="ico-emoji">&#128203;</span><svg class="ico-svg" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg> Status</button>
-    <button class="tab" id="tabGds" onclick="showT('tGds',this)"><span class="ico-emoji">&#128230;</span><svg class="ico-svg" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="16.5" y1="9.4" x2="7.5" y2="4.21"/><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg> Goods</button>
+    <button class="tab" id="tabGds" onclick="showT('tGds',this);stkInit()"><span class="ico-emoji">&#128230;</span><svg class="ico-svg" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="16.5" y1="9.4" x2="7.5" y2="4.21"/><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg> Goods</button>
     <button class="tab" id="tabWalk" onclick="showT('tWalk',this);wkInit()"><span class="ico-emoji">&#128687;</span><svg class="ico-svg" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> Walk-in</button>
     <button class="tab efris-only" id="tabBulk" onclick="showT('tBulk',this)"><span class="ico-emoji">&#9654;</span><svg class="ico-svg" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg> Bulk</button>
     <button class="tab efris-only" id="tabHist" onclick="showT('tHist',this);histLoad(1)"><span class="ico-emoji">&#128203;</span><svg class="ico-svg" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="12 8 12 12 14 14"/><path d="M3.05 11a9 9 0 1 0 .5-4"/><polyline points="3 3 3 7 7 7"/></svg> History</button>
@@ -318,8 +318,10 @@
       <div id="rVerifyLink" style="margin-top:6px;"></div>
       <hr>
       <div id="mgrSave"></div>
-      <div style="margin-top:10px;">
-        <button class="btn" style="width:100%;background:#1b4332;color:#fff;border-color:#1b4332;font-size:12px;" onclick="openReceipt()">&#128438; Print Professional Receipt / PDF</button>
+      <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">
+        <button class="btn" style="flex:1;background:#1b4332;color:#fff;border-color:#1b4332;font-size:12px;" onclick="openReceipt()">&#128438; Print Receipt / PDF</button>
+        <button class="btn bo bsm efris-only" onclick="openCreditNoteModal()" style="font-size:11px;flex:0 0 auto;">&#8629; Credit Note</button>
+      </div>
       </div>
     </div>
     <div class="card hidden" id="errCard">
@@ -600,6 +602,54 @@
             <tbody id="gItemsTbody"><tr><td colspan="11" style="text-align:center;color:var(--gray);padding:20px;">No items yet. Use Configure tab.</td></tr></tbody>
           </table>
         </div>
+      </div>
+    </div>
+    <!-- Stock Management -->
+    <div class="card efris-only" id="stockMgmtCard">
+      <div class="ct">&#128230; Stock Management</div>
+      <p style="font-size:12px;color:var(--gray);margin:0 0 10px;">Record stock arrivals and adjustments in EFRIS. Required for physical goods — services can skip this.</p>
+      <div style="display:flex;gap:6px;margin-bottom:10px;">
+        <button class="btn bsm" id="stkTabIn" onclick="stkSwitch('in')" style="font-size:11px;">+ Stock In</button>
+        <button class="btn bo bsm" id="stkTabAdj" onclick="stkSwitch('adj')" style="font-size:11px;">&#8722; Adjust Stock</button>
+      </div>
+      <div id="stkInPane">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+          <div class="fg" style="margin:0;"><label>Supplier Name</label><input id="stkSupplier" placeholder="e.g. Supplier Ltd"/></div>
+          <div class="fg" style="margin:0;"><label>Supplier TIN (optional)</label><input id="stkSupplierTin"/></div>
+          <div class="fg" style="margin:0;"><label>Date</label><input type="date" id="stkDate"/></div>
+          <div class="fg" style="margin:0;"><label>Type</label>
+            <select id="stkInType">
+              <option value="104">Opening Stock (first time setup)</option>
+              <option value="102">Local Purchase</option>
+              <option value="101">Import</option>
+              <option value="103">Manufacture / Assembly</option>
+            </select>
+          </div>
+        </div>
+        <div class="fg"><label>Remarks (optional)</label><input id="stkRemarks" placeholder="e.g. New stock arrival"/></div>
+        <div id="stkItems"></div>
+        <button class="btn bo bsm" onclick="stkAddItem('in')" style="margin:6px 0 10px;">+ Add item</button>
+        <button class="btn bsm" onclick="stkSubmitIn()">&#128230; Submit Stock-in to EFRIS</button>
+        <div id="stkInResult" style="margin-top:8px;"></div>
+      </div>
+      <div id="stkAdjPane" style="display:none;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+          <div class="fg" style="margin:0;"><label>Date</label><input type="date" id="stkAdjDate"/></div>
+          <div class="fg" style="margin:0;"><label>Reason</label>
+            <select id="stkAdjType">
+              <option value="102">Damaged Goods</option>
+              <option value="101">Expired Goods</option>
+              <option value="103">Personal Use</option>
+              <option value="105">Raw Materials</option>
+              <option value="104">Other (requires remarks)</option>
+            </select>
+          </div>
+        </div>
+        <div class="fg"><label>Remarks</label><input id="stkAdjRemarks" placeholder="Reason for adjustment"/></div>
+        <div id="stkAdjItems"></div>
+        <button class="btn bo bsm" onclick="stkAddItem('adj')" style="margin:6px 0 10px;">+ Add item</button>
+        <button class="btn bsm" onclick="stkSubmitAdj()">&#128230; Submit Adjustment to EFRIS</button>
+        <div id="stkAdjResult" style="margin-top:8px;"></div>
       </div>
     </div>
   </div>
@@ -901,15 +951,31 @@
   <div id="tHist" class="hidden">
     <div class="card">
       <div class="ct">&#128203; Submission History</div>
-      <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
-        <input id="histSearch" placeholder="Search FDN, invoice ID or customer…" style="flex:1;min-width:180px;font-size:13px;" oninput="histLoad(1)" />
-        <button class="btn bo bsm" onclick="histLoad(1)">&#128269; Refresh</button>
-        <span id="histCount" style="font-size:12px;color:var(--gray);"></span>
+      <div style="display:flex;gap:6px;margin-bottom:10px;">
+        <button class="btn bsm" id="histTabLocal" onclick="histSwitchTab('local')" style="font-size:11px;">&#128203; Local Log</button>
+        <button class="btn bo bsm efris-only" id="histTabEfris" onclick="histSwitchTab('efris')" style="font-size:11px;">&#9729; EFRIS Report</button>
       </div>
-      <div id="histTable" style="overflow-x:auto;">
-        <p style="color:var(--gray);font-size:13px;">Loading…</p>
+      <!-- Local log pane -->
+      <div id="histLocalPane">
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
+          <input id="histSearch" placeholder="Search FDN, invoice ID or customer…" style="flex:1;min-width:180px;font-size:13px;" oninput="histLoad(1)" />
+          <button class="btn bo bsm" onclick="histLoad(1)">&#128269; Refresh</button>
+          <span id="histCount" style="font-size:12px;color:var(--gray);"></span>
+        </div>
+        <div id="histTable" style="overflow-x:auto;"><p style="color:var(--gray);font-size:13px;">Loading…</p></div>
+        <div id="histPager" style="display:flex;gap:6px;align-items:center;margin-top:10px;flex-wrap:wrap;"></div>
       </div>
-      <div id="histPager" style="display:flex;gap:6px;align-items:center;margin-top:10px;flex-wrap:wrap;"></div>
+      <!-- EFRIS report pane -->
+      <div id="histEfrisPane" style="display:none;">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px;">
+          <div class="fg" style="margin:0;flex:1;min-width:120px;"><label style="font-size:11px;">From</label><input type="date" id="histRptStart" style="font-size:12px;"/></div>
+          <div class="fg" style="margin:0;flex:1;min-width:120px;"><label style="font-size:11px;">To</label><input type="date" id="histRptEnd" style="font-size:12px;"/></div>
+          <div class="fg" style="margin:0;flex:1;min-width:100px;"><label style="font-size:11px;">Buyer TIN</label><input id="histRptTin" style="font-size:12px;" placeholder="optional"/></div>
+          <button class="btn bsm" onclick="efrisReportLoad(1)" style="font-size:11px;align-self:flex-end;">&#128269; Fetch from EFRIS</button>
+        </div>
+        <div id="efrisRptTable"><p style="font-size:12px;color:var(--gray);">Set date range and click Fetch.</p></div>
+        <div id="efrisRptPager" style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;"></div>
+      </div>
     </div>
   </div>
 
@@ -928,6 +994,7 @@
       <div class="fg"><label>Device Number (DSN)</label><input id="sDsn"/></div>
       <div class="fg"><label>EFRIS Password</label><input id="sPas" type="password"/></div>
       <div class="fg"><label>BRN (optional)</label><input id="sBrn"/></div>
+      <button class="btn bo bsm efris-only" onclick="fetchMyDetails()" style="font-size:11px;margin-top:2px;">&#8595; Auto-fill Business Details from EFRIS</button>
     </div>
     <div class="card"><div class="ct"><span class="ico-emoji">&#128279;</span><svg class="ico-svg" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg> System</div>
       <div class="fg"><label>Manager.io Endpoint</label><input id="sMgr"/></div>
@@ -1206,8 +1273,8 @@ function renderInv(inv){
   hd('subProg'); hd('rCard'); hd('errCard');
   // Pre-populate payment method from Manager custom field
   const mgrPayMethod=sGet('Payment Method','PaymentMethod');
-  const pmCodeMap={'Cash':'101','Credit':'102','Debit Card':'103','Card':'103','Visa':'103','Mastercard':'103','Card (Visa/Mastercard)':'103','Mobile Money':'104','MTN Momo':'104','Airtel Pay':'104','Airtel Money':'104','Cheque':'105','Bank Transfer':'106','Bank':'106'};
-  const pmCode=mgrPayMethod?pmCodeMap[mgrPayMethod.trim()]||'101':'101';
+  const pmCodeMap={'Cash':'102','Credit':'101','Debit Card':'106','Card':'106','Visa':'106','Mastercard':'106','Card (Visa/Mastercard)':'106','Mobile Money':'105','MTN Momo':'105','Airtel Pay':'105','Airtel Money':'105','Cheque':'103','Bank Transfer':'107','Bank':'107','EFT':'107','POS':'108','RTGS':'109','Swift':'110'};
+  const pmCode=mgrPayMethod?pmCodeMap[mgrPayMethod.trim()]||'102':'102';
   _payWays=[{mode:pmCode,amount:''}]; renderPayWays();
   const fdn=(inv.CustomFields&&(inv.CustomFields['Fiscal Document Number']||inv.CustomFields['EFRIS FDN']))||'';
   if(fdn){sh('subDone');tx('exFDN',fdn);}else hd('subDone');
@@ -1408,7 +1475,7 @@ function wkInit(){
 }
 
 function wkReset(){
-  _wkType='b2c'; _wkLines=[{desc:'',qty:1,unit:'Each',price:0,vatRate:0,discount:0,itemCode:'',catPath:''}]; _wkPays=[{mode:'101',amount:''}]; _wkLastResult=null;
+  _wkType='b2c'; _wkLines=[{desc:'',qty:1,unit:'Each',price:0,vatRate:0,discount:0,itemCode:'',catPath:''}]; _wkPays=[{mode:'102',amount:''}]; _wkLastResult=null;
   sv('wkCustName',''); sv('wkTIN',''); sv('wkGovTIN',''); sv('wkGovDept',''); sv('wkForeignName',''); sv('wkPassport',''); sv('wkNationality','');
   const rc=$('wkRCard'); if(rc) rc.style.display='none';
   const fc=document.getElementById('wkCurr'); if(fc) fc.value='UGX';
@@ -1477,7 +1544,7 @@ function wkRenderPays(){
   el.innerHTML=h;
 }
 
-function wkAddPay(){ _wkPays.push({mode:'101',amount:''}); wkRenderPays(); }
+function wkAddPay(){ _wkPays.push({mode:'102',amount:''}); wkRenderPays(); }
 
 function wkRecalc(){
   const subtotal=_wkLines.reduce((s,l)=>s+(l.qty||1)*(l.price||0),0);
@@ -1499,49 +1566,41 @@ function wkRecalc(){
 function wkBuildInvoice(){
   const curr=(document.getElementById('wkCurr')||{}).value||'UGX';
   const fx=parseFloat((document.getElementById('wkFxVal')||{}).value||'1')||1;
-  const custName=gvi('wkCustName')||'Walk-in Customer';
+  const t=_wkType;
+  let custName=gvi('wkCustName')||'Walk-in Customer';
+  let CustomerTIN='',PassportNum='',Nationality='',CustomerDept='',Customer={};
+  if(t==='b2b'){ CustomerTIN=gvi('wkTIN'); Customer={Name:custName,TIN:CustomerTIN}; }
+  else if(t==='b2g'){ CustomerTIN=gvi('wkGovTIN'); CustomerDept=gvi('wkGovDept'); Customer={Name:CustomerDept||custName,TIN:CustomerTIN}; }
+  else if(t==='foreign'){ PassportNum=gvi('wkPassport'); Nationality=gvi('wkNationality'); custName=gvi('wkForeignName')||custName; Customer={Name:custName}; }
+  else { Customer={Name:custName}; }
+  // Build Manager-compatible Lines so buildT109() can process this on the backend
+  const lines=_wkLines.map(l=>({
+    ItemName:l.desc||'Item',
+    ItemCode:l.itemCode||'',
+    Qty:l.qty||1,
+    UnitPrice:l.price||0,
+    LineTotal:Math.round(((l.qty||1)*(l.price||0))*100)/100,
+    TaxAmount:Math.round(((l.qty||1)*(l.price||0)*(l.vatRate||0)/100)*100)/100,
+    TaxName:(l.vatRate||0)>0?'Standard VAT 18%':'',
+    EFRISUnitOfMeasure:l.unit&&l.unit!=='Each'?l.unit:'101',
+    EFRISCommodityCode:l.catPath||'',
+    _discount:l.discount||0,
+  }));
   const subtotal=_wkLines.reduce((s,l)=>s+(l.qty||1)*(l.price||0),0);
   const vatTotal=_wkLines.reduce((s,l)=>s+(l.qty||1)*(l.price||0)*(l.vatRate||0)/100,0);
   const discTotal=_wkLines.reduce((s,l)=>s+(l.discount||0),0);
-  const total=subtotal+vatTotal-discTotal;
-  // Map to EFRIS invoice structure
-  const t=_wkType;
-  let buyerDetails={};
-  if(t==='b2b') buyerDetails={buyerTin:gvi('wkTIN')||'',buyerType:'10',buyerNinBrn:''};
-  else if(t==='b2g') buyerDetails={buyerTin:gvi('wkGovTIN')||'',buyerType:'20',buyerNinBrn:'',buyerLegalName:gvi('wkGovDept')||''};
-  else if(t==='foreign') buyerDetails={buyerPassportNum:gvi('wkPassport')||'',buyerType:'30',buyerNationality:gvi('wkNationality')||'',buyerLegalName:gvi('wkForeignName')||''};
-  else buyerDetails={buyerType:'10',buyerTin:'',buyerNinBrn:''};
-  const payModes=_wkPays.map((pw,i)=>({paymentMode:pw.mode||'101',paymentAmount:pw.amount?parseFloat(pw.amount)||0:(i===0?total:0)})).filter(p=>p.paymentAmount>0);
+  const total=Math.round((subtotal+vatTotal-discTotal)*100)/100;
+  const payWays=_wkPays.map((pw,i)=>({mode:pw.mode||'102',amount:pw.amount?parseFloat(pw.amount)||0:(i===0?total:0)})).filter(pw=>pw.amount>0);
   return {
-    basicInformation:{
-      invoiceKind: CFG.vatReg ? '1' : '2',
-      invoiceType: '1',
-      currency: curr,
-      invoiceIndustryCodes:'101',
-      buyerDetails,
-      sellerDetails:{ tin:CFG.tin, legalName:CFG.legalName||CFG.tradeName||'Business' }
-    },
-    goodsDetails: _wkLines.map((l,i)=>({
-      item: l.desc||('Item '+(i+1)),
-      itemCode: l.itemCode||('WLK'+(i+1).toString().padStart(3,'0')),
-      quantity: l.qty||1,
-      unitOfMeasure: l.unit||'Each',
-      unitPrice: l.price||0,
-      totalAmount: Math.round(((l.qty||1)*(l.price||0))*100)/100,
-      taxRate: l.vatRate||0,
-      taxAmount: Math.round(((l.qty||1)*(l.price||0)*(l.vatRate||0)/100)*100)/100,
-      discountTotal: l.discount||0,
-      orderNumber: String(i+1),
-      taxRule: (l.vatRate||0)>0 ? (CFG.vatReg?'A':'B') : 'B',
-      categoryPath: l.catPath||'',
-    })),
-    payWay: payModes.length ? payModes : [{paymentMode:'101',paymentAmount:total}],
-    summary:{ netAmount:subtotal, taxAmount:vatTotal, grossAmount:total, discountTotal:discTotal },
-    _walkIn: true,
-    _custName: custName,
-    _total: total,
-    _currency: curr,
-    _fx: fx,
+    Lines:lines, Customer, CustomerType:t, CustomerTIN,
+    CustomerName:Customer.Name||custName, PassportNum, Nationality, CustomerDept,
+    CustomerAddress:'', CustomerEmail:'', Currency:curr,
+    ExchangeRate:curr!=='UGX'?fx:undefined,
+    Reference:'WLK-'+Date.now(), IssueDate:new Date().toISOString().slice(0,10),
+    PayWays:payWays, Total:total,
+    _walkIn:true, _custName:Customer.Name||custName,
+    _total:total, _currency:curr, _fx:fx,
+    _lines:_wkLines, _payWays:payWays,
   };
 }
 
@@ -1576,12 +1635,34 @@ function wkPrintAfterSubmit(){
 
 function _openReceiptWith(inv, efris){
   const p=new URLSearchParams();
-  const custName=inv._custName||'Walk-in Customer';
-  p.set('custName',custName);
-  p.set('custTin','');
-  p.set('custType',_wkType||'b2c');
-  p.set('invoiceNo','WLK-'+Date.now());
-  p.set('issueDate',new Date().toISOString().slice(0,10));
+  // Detect Manager-format walk-in invoice (has Lines array, no goodsDetails)
+  const isManagerFmt = inv._walkIn && inv.Lines;
+  const wkLines = isManagerFmt ? inv._lines || [] : [];
+  const lines = isManagerFmt
+    ? (inv.Lines||[]).map((l,i)=>({
+        itemName:l.ItemName||'',itemCode:l.ItemCode||'',
+        qty:l.Qty||1,unitPrice:l.UnitPrice||0,lineTotal:l.LineTotal||0,
+        vatRate:l.TaxAmount&&l.Qty&&l.UnitPrice?(l.TaxAmount/(l.Qty*l.UnitPrice)*100):0,
+        vatAmount:l.TaxAmount||0,discount:(wkLines[i]&&wkLines[i].discount)||0,
+        unit:l.EFRISUnitOfMeasure||'101',categoryPath:'',commodityCode:l.ItemCode||'',
+      }))
+    : (inv.goodsDetails||[]).map(l=>({
+        itemName:l.item||l.description||'',itemCode:l.itemCode||'',
+        qty:l.quantity||l.qty||1,unitPrice:l.unitPrice||0,lineTotal:l.totalAmount||l.total||0,
+        vatRate:l.taxRate||0,vatAmount:l.taxAmount||l.tax||0,discount:l.discountTotal||0,
+        unit:l.unitOfMeasure||'101',categoryPath:l.categoryPath||'',commodityCode:l.itemCode||'',
+      }));
+  const payArr = isManagerFmt
+    ? (inv.PayWays||[]).map(pw=>{ const lbl=PAY_MODES.find(m=>m[0]===pw.mode); return {label:lbl?lbl[1]:'Cash',amount:pw.amount}; })
+    : (inv.payWay||[]).map(pw=>{ const lbl=PAY_MODES.find(m=>m[0]===pw.paymentMode); return {label:lbl?lbl[1]:'Cash',amount:pw.paymentAmount}; });
+  const sub = lines.reduce((s,l)=>s+l.unitPrice*l.qty,0);
+  const vat = lines.reduce((s,l)=>s+l.vatAmount,0);
+  const disc = lines.reduce((s,l)=>s+l.discount,0);
+  p.set('custName',inv._custName||'Walk-in Customer');
+  p.set('custTin',inv.CustomerTIN||'');
+  p.set('custType',inv.CustomerType||_wkType||'b2c');
+  p.set('invoiceNo',inv.Reference||('WLK-'+Date.now()));
+  p.set('issueDate',inv.IssueDate||new Date().toISOString().slice(0,10));
   p.set('currency',inv._currency||'UGX');
   p.set('fxRate',inv._fx||1);
   p.set('bizName',CFG.legalName||CFG.tradeName||'');
@@ -1601,27 +1682,11 @@ function _openReceiptWith(inv, efris){
     p.set('submissionDate',efris.issuedDate||new Date().toISOString());
     p.set('deviceNo',efris.deviceNo||CFG.deviceNo||'');
   }
-  const lines=inv.goodsDetails||[];
-  p.set('lines',JSON.stringify(lines.map(l=>({
-    itemName:l.item||l.description||'',
-    itemCode:l.itemCode||'',
-    qty:l.quantity||1,
-    unitPrice:l.unitPrice||0,
-    lineTotal:l.totalAmount||0,
-    vatRate:l.taxRate||0,
-    vatAmount:l.taxAmount||0,
-    discount:l.discountTotal||0,
-    unit:l.unitOfMeasure||'Each',
-    categoryPath:l.categoryPath||'',
-    commodityCode:l.itemCode||'',
-  }))));
-  p.set('payMethods',JSON.stringify((inv.payWay||[]).map(pw=>{
-    const lbl=PAY_MODES.find(m=>m[0]===pw.paymentMode);
-    return {label:lbl?lbl[1]:'Cash',amount:pw.paymentAmount};
-  })));
-  p.set('subTotal',inv.summary?inv.summary.netAmount:inv._total||0);
-  p.set('vatTotal',inv.summary?inv.summary.taxAmount:0);
-  p.set('discTotal',inv.summary?inv.summary.discountTotal:0);
+  p.set('lines',JSON.stringify(lines));
+  p.set('payMethods',JSON.stringify(payArr));
+  p.set('subTotal',sub);
+  p.set('vatTotal',vat);
+  p.set('discTotal',disc);
   p.set('grandTotal',inv._total||0);
   window.open(RELAY+'/receipt?'+p.toString(),'_blank');
 }
@@ -1692,8 +1757,8 @@ async function bulkStart(){
       else if(_custType==='b2g'){ sv('cGovTIN', custTINval||''); sv('cGovDept',(INV.Customer&&INV.Customer.Name)||''); }
       else if(_custType==='foreign'){ sv('cPassport',INV.PassportNum||''); sv('cNationality',INV.Nationality||''); sv('cForeignName',(INV.Customer&&INV.Customer.Name)||''); }
       const mgrPM=sGet('Payment Method','PaymentMethod');
-      const pmMap={'Cash':'101','Credit':'102','Debit Card':'103','Card':'103','Card (Visa/Mastercard)':'103','Mobile Money':'104','MTN Momo':'104','Airtel Pay':'104','Cheque':'105','Bank Transfer':'106'};
-      _payWays=[{mode:(mgrPM&&pmMap[mgrPM.trim()])||'101',amount:''}];
+      const pmMap={'Cash':'102','Credit':'101','Debit Card':'106','Card':'106','Card (Visa/Mastercard)':'106','Mobile Money':'105','MTN Momo':'105','Airtel Pay':'105','Cheque':'103','Bank Transfer':'107','EFT':'107','POS':'108'};
+      _payWays=[{mode:(mgrPM&&pmMap[mgrPM.trim()])||'102',amount:''}];
       // Check not already submitted
       const existFDN=s['Fiscal Document Number']||s['EFRIS FDN']||'';
       if(existFDN){ row.status='ok'; row.fdn=existFDN; row.error='Already submitted (FDN exists)'; renderBulkTable(); continue; }
@@ -2041,8 +2106,8 @@ async function doCreditNote(){
 }
 
 // ── Payment Ways ──────────────────────────────────────────────
-const PAY_MODES=[['101','Cash'],['102','Credit'],['103','Debit Card'],['104','Mobile Money'],['105','Cheque'],['106','Bank Transfer']];
-let _payWays=[{mode:'101',amount:''}];
+const PAY_MODES=[['102','Cash'],['101','Credit'],['105','Mobile Money'],['106','Visa / Mastercard'],['103','Cheque'],['107','EFT / Bank Transfer'],['108','POS'],['109','RTGS'],['110','Swift Transfer']];
+let _payWays=[{mode:'102',amount:''}];
 
 function renderPayWays(){
   const el=$('payWaysList'); if(!el)return;
@@ -2082,7 +2147,7 @@ function addPayWay(){
   const total=INV?parseFloat(INV.Total||0):0;
   const paid=_payWays.reduce((s,pw)=>s+(parseFloat(pw.amount)||0),0);
   const rem=Math.max(0,Math.round((total-paid)*100)/100);
-  _payWays.push({mode:'101',amount:rem>0?String(rem):''});
+  _payWays.push({mode:'102',amount:rem>0?String(rem):''});
   renderPayWays();
 }
 
@@ -2094,7 +2159,7 @@ function getPayWays(){
     mode:pw.mode||'101',
     amount:pw.amount?parseFloat(pw.amount)||0:(i===0?grossTotal:0)
   })).filter(pw=>pw.amount>0);
-  if(!ways.length) return [{mode:'101',amount:grossTotal}];
+  if(!ways.length) return [{mode:'102',amount:grossTotal}];
   // If partial payment, add remaining balance as Credit (102)
   const paid=ways.reduce((s,pw)=>s+pw.amount,0);
   const rem=Math.round((grossTotal-paid)*100)/100;
@@ -3231,5 +3296,243 @@ async function doCreateReceipt(managerOnly){
     <div id="crResult" style="margin-top:8px;"></div>
   </div>
 </div>
+<!-- ══ CREDIT NOTE MODAL ══ -->
+<div id="cnModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:10px;padding:20px;width:min(480px,95vw);max-height:88vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,.25);">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <strong style="font-size:14px;">&#8629; Issue Credit Note</strong>
+      <button onclick="closeCreditNoteModal()" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--gray);">&#10005;</button>
+    </div>
+    <div class="fg"><label>Original FDN</label><input id="cnFDN" readonly style="background:var(--bg2);font-family:monospace;"/></div>
+    <div class="fg"><label>Your Reference No.</label><input id="cnRef" placeholder="CN-001"/></div>
+    <div class="fg"><label>Reason</label>
+      <select id="cnReason" onchange="document.getElementById('cnReasonTextRow').style.display=this.value==='105'?'':'none'">
+        <option value="102">Cancellation of purchase</option>
+        <option value="101">Return of products (expiry / damage)</option>
+        <option value="103">Invoice amount wrongly stated</option>
+        <option value="104">Partial / complete waive off</option>
+        <option value="105">Other (describe below)</option>
+      </select>
+    </div>
+    <div class="fg" id="cnReasonTextRow" style="display:none;"><label>Reason description</label><input id="cnReasonText" placeholder="Required for 'Other'"/></div>
+    <div class="fg"><label>Remarks (optional)</label><input id="cnRemarks"/></div>
+    <div style="font-size:11px;font-weight:600;color:var(--gray);text-transform:uppercase;letter-spacing:.5px;margin:12px 0 6px;">Items to credit</div>
+    <div id="cnItems"></div>
+    <button class="btn bo bsm" onclick="cnAddItem()" style="margin-bottom:12px;">+ Add item</button>
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button class="btn bo bsm" onclick="closeCreditNoteModal()">Cancel</button>
+      <button class="btn bsm" id="cnSubmitBtn" onclick="submitCreditNote()">&#8629; Submit Credit Note</button>
+    </div>
+    <div id="cnResult" style="margin-top:10px;"></div>
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════════════
+//  Credit Note
+// ══════════════════════════════════════════════════════════════
+var _cnItems=[];
+function openCreditNoteModal(){
+  const fdn=($('rFDN')||{}).textContent||'';
+  if(!fdn||fdn==='—'){alert('No FDN available — submit to EFRIS first.');return;}
+  sv('cnFDN',fdn);
+  sv('cnRef','CN-'+Date.now());
+  _cnItems=[{itemCode:'',quantity:1,unitPrice:0,orderNumber:0}];
+  cnRenderItems();
+  ht('cnResult','');
+  const m=$('cnModal'); if(m){m.style.display='flex';}
+}
+function closeCreditNoteModal(){ const m=$('cnModal'); if(m) m.style.display='none'; }
+function cnRenderItems(){
+  const el=$('cnItems'); if(!el) return;
+  let h='<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:4px;"><thead><tr style="background:var(--bg2);"><th style="padding:4px 6px;text-align:left;">Item Code</th><th style="padding:4px 6px;width:60px;">Qty</th><th style="padding:4px 6px;width:90px;">Unit Price</th><th style="padding:4px 6px;width:50px;">Line #</th><th></th></tr></thead><tbody>';
+  _cnItems.forEach((it,i)=>{
+    h+='<tr style="border-bottom:1px solid var(--brd);"><td style="padding:3px;"><input value="'+esc(it.itemCode)+'" style="width:100%;font-size:12px;" oninput="_cnItems['+i+'].itemCode=this.value" placeholder="e.g. ITEM001"/></td>'
+      +'<td style="padding:3px;"><input type="number" value="'+it.quantity+'" style="width:100%;font-size:12px;" oninput="_cnItems['+i+'].quantity=+this.value"/></td>'
+      +'<td style="padding:3px;"><input type="number" value="'+it.unitPrice+'" style="width:100%;font-size:12px;" oninput="_cnItems['+i+'].unitPrice=+this.value"/></td>'
+      +'<td style="padding:3px;"><input type="number" value="'+it.orderNumber+'" style="width:100%;font-size:12px;" oninput="_cnItems['+i+'].orderNumber=+this.value"/></td>'
+      +(_cnItems.length>1?'<td><button onclick="_cnItems.splice('+i+',1);cnRenderItems()" style="background:none;border:none;color:#c62828;cursor:pointer;">&#10005;</button></td>':'<td></td>')
+      +'</tr>';
+  });
+  h+='</tbody></table>';
+  el.innerHTML=h;
+}
+function cnAddItem(){ _cnItems.push({itemCode:'',quantity:1,unitPrice:0,orderNumber:_cnItems.length}); cnRenderItems(); }
+async function submitCreditNote(){
+  const fdn=gvi('cnFDN'); if(!fdn){alert('No FDN');return;}
+  const reasonCode=($('cnReason')||{}).value||'102';
+  const reason=reasonCode==='105'?gvi('cnReasonText'):'';
+  if(reasonCode==='105'&&!reason){alert('Enter reason description for "Other"');return;}
+  const btn=$('cnSubmitBtn'); if(btn){btn.disabled=true;btn.textContent='Submitting…';}
+  ht('cnResult','');
+  try{
+    const r=await fetch(RELAY+'/api/efris/credit-note',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      originalFDN:fdn,originalInvoiceId:(_lastEfrisResult&&_lastEfrisResult.invoiceId)||'',
+      reasonCode,reason,remarks:gvi('cnRemarks'),referenceNo:gvi('cnRef'),
+      items:_cnItems,
+      config:{tin:CFG.tin,deviceNo:CFG.deviceNo,efrisPassword:CFG.efrisPassword,mode:CFG.sandbox?'sandbox':'production'}
+    })});
+    const d=await r.json();
+    ht('cnResult',d.success
+      ?'<div class="st ss">&#10003; Credit note submitted — FDN: <strong>'+(d.fdn||'—')+'</strong>'+(d.referenceNo?', Ref: '+esc(d.referenceNo):'')+'</div>'
+      :'<div class="st se">&#10005; '+esc(d.error||'Failed')+'</div>');
+  }catch(e){ ht('cnResult','<div class="st se">'+esc(e.message)+'</div>'); }
+  if(btn){btn.disabled=false;btn.textContent='&#8629; Submit Credit Note';}
+}
+
+// ══════════════════════════════════════════════════════════════
+//  EFRIS Invoice Report (History tab)
+// ══════════════════════════════════════════════════════════════
+var _efrisRptPage=1;
+function histSwitchTab(mode){
+  const lp=$('histLocalPane'),ep=$('histEfrisPane');
+  const lb=$('histTabLocal'),eb=$('histTabEfris');
+  if(lp) lp.style.display=mode==='local'?'':'none';
+  if(ep) ep.style.display=mode==='efris'?'':'none';
+  if(lb){ lb.className=mode==='local'?'btn bsm':'btn bo bsm'; lb.style.fontSize='11px'; }
+  if(eb){ eb.className=mode==='efris'?'btn bsm':'btn bo bsm'; eb.style.fontSize='11px'; }
+}
+async function efrisReportLoad(page){
+  _efrisRptPage=page||1;
+  const start=(document.getElementById('histRptStart')||{}).value;
+  const end=(document.getElementById('histRptEnd')||{}).value;
+  if(!start||!end){alert('Select start and end date');return;}
+  const el=$('efrisRptTable'); if(!el) return;
+  el.innerHTML='<p style="font-size:12px;color:var(--gray);">Loading from EFRIS…</p>';
+  try{
+    const r=await fetch(RELAY+'/api/efris/invoices-report',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      startDate:start,endDate:end,pageNo:_efrisRptPage,pageSize:20,
+      buyerTin:gvi('histRptTin'),
+      config:{tin:CFG.tin,deviceNo:CFG.deviceNo,efrisPassword:CFG.efrisPassword,mode:CFG.sandbox?'sandbox':'production'}
+    })});
+    const d=await r.json();
+    if(!d.success){el.innerHTML='<p style="color:#c62828;font-size:12px;">'+esc(d.error||'Error')+'</p>';return;}
+    const recs=d.records||[];
+    if(!recs.length){el.innerHTML='<p style="font-size:12px;color:var(--gray);">No invoices found for this period.</p>';ht('efrisRptPager','');return;}
+    let h='<table style="width:100%;border-collapse:collapse;font-size:11px;"><thead><tr style="background:var(--bg2);"><th style="padding:5px 6px;text-align:left;">Date</th><th style="padding:5px 6px;">FDN</th><th style="padding:5px 6px;">Buyer</th><th style="padding:5px 6px;text-align:right;">Gross</th><th style="padding:5px 6px;text-align:right;">Tax</th><th style="padding:5px 6px;">Ref</th></tr></thead><tbody>';
+    recs.forEach(rec=>{
+      const amt=rec.grossAmount?Number(rec.grossAmount).toLocaleString('en-UG',{maximumFractionDigits:0}):'—';
+      const tax=rec.taxAmount?Number(rec.taxAmount).toLocaleString('en-UG',{maximumFractionDigits:0}):'—';
+      h+='<tr style="border-bottom:1px solid var(--brd);">'
+        +'<td style="padding:4px 6px;white-space:nowrap;">'+esc(rec.issuedDateStr||rec.issuedDate||'—')+'</td>'
+        +'<td style="padding:4px 6px;font-family:monospace;font-size:10px;">'+esc(rec.invoiceNo||'—')+'</td>'
+        +'<td style="padding:4px 6px;">'+esc(((rec.buyerLegalName||rec.buyerBusinessName||'—')).slice(0,22))+'</td>'
+        +'<td style="padding:4px 6px;text-align:right;">'+esc(rec.currency||'UGX')+' '+amt+'</td>'
+        +'<td style="padding:4px 6px;text-align:right;">'+tax+'</td>'
+        +'<td style="padding:4px 6px;font-family:monospace;font-size:10px;">'+esc((rec.referenceNo||'—').slice(0,14))+'</td>'
+        +'</tr>';
+    });
+    h+='</tbody></table>';
+    el.innerHTML=h;
+    const pg=d.page||{};const pages=pg.pageCount||1;
+    let pager='';
+    if(pages>1){
+      if(_efrisRptPage>1) pager+='<button class="btn bo bsm" onclick="efrisReportLoad('+(_efrisRptPage-1)+')">&#8249; Prev</button>';
+      pager+='<span style="font-size:11px;color:var(--gray);">Page '+_efrisRptPage+' / '+pages+' ('+pg.totalSize+' records)</span>';
+      if(_efrisRptPage<pages) pager+='<button class="btn bo bsm" onclick="efrisReportLoad('+(_efrisRptPage+1)+')">Next &#8250;</button>';
+    }
+    ht('efrisRptPager',pager);
+  }catch(e){el.innerHTML='<p style="color:#c62828;font-size:12px;">'+esc(e.message)+'</p>';}
+}
+
+// ══════════════════════════════════════════════════════════════
+//  Fetch My Details from EFRIS (Settings)
+// ══════════════════════════════════════════════════════════════
+async function fetchMyDetails(){
+  if(!CFG.tin||!CFG.deviceNo||!CFG.efrisPassword){alert('Enter TIN, Device No. and EFRIS Password in Settings first.');return;}
+  const btn=document.querySelector('[onclick="fetchMyDetails()"]');
+  if(btn){btn.disabled=true;btn.textContent='Fetching…';}
+  try{
+    const r=await fetch(RELAY+'/api/efris/my-details',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({config:{tin:CFG.tin,deviceNo:CFG.deviceNo,efrisPassword:CFG.efrisPassword,mode:CFG.sandbox?'sandbox':'production'}})});
+    const d=await r.json();
+    if(!d.success){alert('Could not fetch: '+(d.error||'Unknown error'));return;}
+    if(d.legalName&&!gvi('sLeg')) sv('sLeg',d.legalName);
+    if(d.businessName&&!gvi('sTrd')) sv('sTrd',d.businessName);
+    if(d.address&&!gvi('sAddr')) sv('sAddr',d.address);
+    if(d.email&&!gvi('sEmail')) sv('sEmail',d.email);
+    if(d.phone&&!gvi('sPhone')) sv('sPhone',d.phone);
+    alert('Details fetched from EFRIS — review fields and click Save Settings.');
+  }catch(e){alert('Error: '+e.message);}
+  if(btn){btn.disabled=false;btn.textContent='&#8595; Auto-fill Business Details from EFRIS';}
+}
+
+// ══════════════════════════════════════════════════════════════
+//  Stock Management
+// ══════════════════════════════════════════════════════════════
+var _stkInItems=[], _stkAdjItems=[];
+function stkSwitch(mode){
+  const ip=$('stkInPane'),ap=$('stkAdjPane');
+  if(ip) ip.style.display=mode==='in'?'':'none';
+  if(ap) ap.style.display=mode==='adj'?'':'none';
+  const ti=$('stkTabIn'),ta=$('stkTabAdj');
+  if(ti){ti.className=mode==='in'?'btn bsm':'btn bo bsm';ti.style.fontSize='11px';}
+  if(ta){ta.className=mode==='adj'?'btn bsm':'btn bo bsm';ta.style.fontSize='11px';}
+}
+function stkAddItem(type){
+  if(type==='in'){_stkInItems.push({itemCode:'',quantity:1,unitPrice:0});stkRenderItems('in');}
+  else{_stkAdjItems.push({itemCode:'',quantity:1,unitPrice:0});stkRenderItems('adj');}
+}
+function stkRenderItems(type){
+  const arr=type==='in'?_stkInItems:_stkAdjItems;
+  const el=$(type==='in'?'stkItems':'stkAdjItems'); if(!el) return;
+  if(!arr.length){el.innerHTML='';return;}
+  let h='<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:4px;"><thead><tr style="background:var(--bg2);"><th style="padding:4px;text-align:left;">Item Code</th><th style="padding:4px;width:70px;">Qty</th><th style="padding:4px;width:100px;">Unit Cost</th><th></th></tr></thead><tbody>';
+  const ar=type==='in'?'_stkInItems':'_stkAdjItems';
+  arr.forEach((it,i)=>{
+    h+='<tr style="border-bottom:1px solid var(--brd);">'
+      +'<td style="padding:3px;"><input value="'+esc(it.itemCode)+'" style="width:100%;font-size:12px;" oninput="'+ar+'['+i+'].itemCode=this.value" placeholder="Registered EFRIS item code"/></td>'
+      +'<td style="padding:3px;"><input type="number" value="'+it.quantity+'" style="width:100%;font-size:12px;" oninput="'+ar+'['+i+'].quantity=+this.value"/></td>'
+      +'<td style="padding:3px;"><input type="number" value="'+it.unitPrice+'" style="width:100%;font-size:12px;" oninput="'+ar+'['+i+'].unitPrice=+this.value"/></td>'
+      +(arr.length>1?'<td><button onclick="'+ar+'.splice('+i+',1);stkRenderItems(\''+type+'\')" style="background:none;border:none;color:#c62828;cursor:pointer;">&#10005;</button></td>':'<td></td>')
+      +'</tr>';
+  });
+  h+='</tbody></table>';
+  el.innerHTML=h;
+}
+function stkInit(){
+  const today=new Date().toISOString().slice(0,10);
+  const sd=$('stkDate'); if(sd&&!sd.value) sd.value=today;
+  const ad=$('stkAdjDate'); if(ad&&!ad.value) ad.value=today;
+  if(!_stkInItems.length){_stkInItems=[{itemCode:'',quantity:1,unitPrice:0}];stkRenderItems('in');}
+  if(!_stkAdjItems.length){_stkAdjItems=[{itemCode:'',quantity:1,unitPrice:0}];stkRenderItems('adj');}
+}
+async function stkSubmitIn(){
+  const items=_stkInItems.filter(i=>i.itemCode.trim());
+  if(!items.length){alert('Add at least one item with a code');return;}
+  if(!CFG.tin){alert('Complete EFRIS settings first');return;}
+  const btn=document.querySelector('[onclick="stkSubmitIn()"]');if(btn){btn.disabled=true;btn.textContent='Submitting…';}
+  ht('stkInResult','');
+  try{
+    const r=await fetch(RELAY+'/api/efris/stock-in',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      supplierName:gvi('stkSupplier'),supplierTin:gvi('stkSupplierTin'),
+      stockInDate:gvi('stkDate'),stockInType:($('stkInType')||{}).value||'104',
+      remarks:gvi('stkRemarks'),items,
+      config:{tin:CFG.tin,deviceNo:CFG.deviceNo,efrisPassword:CFG.efrisPassword,mode:CFG.sandbox?'sandbox':'production'}
+    })});
+    const d=await r.json();
+    if(d.success) ht('stkInResult','<div class="st ss">&#10003; Stock recorded in EFRIS'+(d.partialErrors&&d.partialErrors.length?' ('+d.partialErrors.length+' item error(s))':'')+'</div>');
+    else ht('stkInResult','<div class="st se">&#10005; '+esc(d.error||'Failed')+(d.partialErrors&&d.partialErrors.length?'<br>'+d.partialErrors.map(e=>esc(e.itemCode+': '+e.returnMessage)).join('<br>'):'')+'</div>');
+  }catch(e){ht('stkInResult','<div class="st se">'+esc(e.message)+'</div>');}
+  if(btn){btn.disabled=false;btn.textContent='&#128230; Submit Stock-in to EFRIS';}
+}
+async function stkSubmitAdj(){
+  const items=_stkAdjItems.filter(i=>i.itemCode.trim());
+  if(!items.length){alert('Add at least one item with a code');return;}
+  if(!CFG.tin){alert('Complete EFRIS settings first');return;}
+  const btn=document.querySelector('[onclick="stkSubmitAdj()"]');if(btn){btn.disabled=true;btn.textContent='Submitting…';}
+  ht('stkAdjResult','');
+  try{
+    const r=await fetch(RELAY+'/api/efris/stock-adjust',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      adjustDate:gvi('stkAdjDate'),adjustType:($('stkAdjType')||{}).value||'102',
+      remarks:gvi('stkAdjRemarks'),items,
+      config:{tin:CFG.tin,deviceNo:CFG.deviceNo,efrisPassword:CFG.efrisPassword,mode:CFG.sandbox?'sandbox':'production'}
+    })});
+    const d=await r.json();
+    if(d.success) ht('stkAdjResult','<div class="st ss">&#10003; Stock adjustment recorded in EFRIS</div>');
+    else ht('stkAdjResult','<div class="st se">&#10005; '+esc(d.error||'Failed')+'</div>');
+  }catch(e){ht('stkAdjResult','<div class="st se">'+esc(e.message)+'</div>');}
+  if(btn){btn.disabled=false;btn.textContent='&#128230; Submit Adjustment to EFRIS';}
+}
+</script>
 </body>
 </html>

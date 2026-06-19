@@ -1289,14 +1289,10 @@ app.post('/api/efris/submit-invoice', async (req, res) => {
           deviceNo: config.deviceNo,
           invoiceId,
           returnCode: rc,
-          customerName: invoice.basicInformation && invoice.basicInformation.buyerDetails
-            ? invoice.basicInformation.buyerDetails.buyerTin || ''
-            : '',
-          totalAmount: invoice.goodsDetails
-            ? invoice.goodsDetails.reduce((s, g) => s + (parseFloat(g.totalAmount) || 0), 0)
-            : 0,
-          currency: invoice.basicInformation && invoice.basicInformation.currency || 'UGX',
-          invoiceKind: invoice.basicInformation && invoice.basicInformation.invoiceKind || '',
+          customerName: t109data.buyerDetails ? (t109data.buyerDetails.buyerLegalName || t109data.buyerDetails.buyerTin || '') : '',
+          totalAmount: t109data.summary ? parseFloat(t109data.summary.grossAmount) || 0 : 0,
+          currency: t109data.basicInformation ? t109data.basicInformation.currency || 'UGX' : 'UGX',
+          invoiceKind: t109data.basicInformation ? t109data.basicInformation.invoiceKind || '' : '',
           mode: config.mode || 'sandbox',
         };
         appendSubmissionLog(logEntry);
@@ -1340,6 +1336,188 @@ app.post('/api/efris/verify-tin', async (req, res) => {
     }
     res.json(ok
       ? { success: true, tin: buyerTin, taxpayer: info, taxpayerName, returnCode: rc }
+      : { success: false, error: 'URA ' + rc + ': ' + rm, returnCode: rc });
+  } catch(e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ── My details (T119 with own TIN) ────────────────────────────
+app.post('/api/efris/my-details', async (req, res) => {
+  const { config } = req.body || {};
+  if (!config || !config.tin) return res.status(400).json({ success: false, error: 'config.tin required' });
+  const eu = config.mode === 'production'
+    ? 'https://efrisws.ura.go.ug/ws/taapp/getInformation'
+    : 'https://efristest.ura.go.ug/efrisws/ws/taapp/getInformation';
+  try {
+    const session = await getSession(config.tin, config.deviceNo, config.efrisPassword, eu);
+    if (!session.aesKey) throw new Error('No AES key');
+    const t119 = await efrisCall(eu, efrisEnvEnc('T119', { tin: config.tin, ninBrn: '', queryType: '1' }, config.tin, config.deviceNo, session.aesKey, session.privatePem));
+    const rc = t119.data && t119.data.returnStateInfo ? t119.data.returnStateInfo.returnCode : null;
+    const rm = t119.data && t119.data.returnStateInfo ? t119.data.returnStateInfo.returnMessage : '';
+    let info = null;
+    if (t119.data && t119.data.data && t119.data.data.content) {
+      try { const s = aesDecryptStr(t119.data.data.content, session.aesKey); info = JSON.parse(s); } catch(e) {}
+    }
+    if (rc !== '00') return res.json({ success: false, error: 'URA ' + rc + ': ' + rm });
+    const tp = (info && (info.taxpayer || info)) || {};
+    res.json({ success: true, legalName: tp.taxpayerLegalName || tp.legalName || tp.taxpayerName || '', businessName: tp.taxpayerName || tp.businessName || tp.legalName || '', address: tp.address || tp.placeOfBusiness || '', email: tp.contactEmail || '', phone: tp.contactMobile || tp.contactNumber || '', tin: config.tin });
+  } catch(e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ── Credit Note (T108) ────────────────────────────────────────
+app.post('/api/efris/credit-note', async (req, res) => {
+  const { originalFDN, originalInvoiceId, reasonCode, reason, remarks, referenceNo, items, config } = req.body || {};
+  if (!originalFDN || !config || !config.tin) return res.status(400).json({ success: false, error: 'originalFDN and config required' });
+  const eu = config.mode === 'production'
+    ? 'https://efrisws.ura.go.ug/ws/taapp/getInformation'
+    : 'https://efristest.ura.go.ug/efrisws/ws/taapp/getInformation';
+  try {
+    const session = await getSession(config.tin, config.deviceNo, config.efrisPassword, eu);
+    if (!session.aesKey) throw new Error('No AES key for T108');
+    const t108data = {
+      oriInvoiceId: originalInvoiceId || '',
+      oriInvoiceNo: originalFDN,
+      reasonCode: reasonCode || '102',
+      reason: reason || '',
+      invoiceApplyCategoryCode: '101',
+      remarks: remarks || '',
+      sellersReferenceNo: referenceNo || ('CN-' + Date.now()),
+      goodsDetails: (items || []).map((item, i) => ({
+        itemCode: String(item.itemCode || ''),
+        qty: String(item.quantity || 1),
+        unitPrice: String(item.unitPrice || 0),
+        orderNumber: String(item.orderNumber !== undefined ? item.orderNumber : i),
+      })),
+    };
+    const t108 = await efrisCall(eu, efrisEnvEnc('T108', t108data, config.tin, config.deviceNo, session.aesKey, session.privatePem));
+    const rc = t108.data && t108.data.returnStateInfo ? t108.data.returnStateInfo.returnCode : null;
+    const rm = t108.data && t108.data.returnStateInfo ? t108.data.returnStateInfo.returnMessage : '';
+    let fdn = null, cnRef = null;
+    if (t108.data && t108.data.data && t108.data.data.content) {
+      try {
+        const s = aesDecryptStr(t108.data.data.content, session.aesKey);
+        const d = JSON.parse(s);
+        fdn = d.invoiceNo || d.fdn || d.fiscalDocumentNumber || null;
+        cnRef = d.referenceNo || referenceNo || null;
+        console.log('   T108 credit note:', JSON.stringify(d));
+      } catch(e) { console.log('   T108 parse error:', e.message); }
+    }
+    const ok = rc === '00' || !!fdn;
+    res.json(ok
+      ? { success: true, fdn, referenceNo: cnRef, returnCode: rc, returnMessage: rm }
+      : { success: false, error: 'URA ' + rc + ': ' + rm, returnCode: rc });
+  } catch(e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ── Invoice Report (T144) ─────────────────────────────────────
+app.post('/api/efris/invoices-report', async (req, res) => {
+  const { startDate, endDate, pageNo, pageSize, buyerTin, referenceNo, config } = req.body || {};
+  if (!startDate || !endDate || !config || !config.tin) return res.status(400).json({ success: false, error: 'startDate, endDate and config required' });
+  const eu = config.mode === 'production'
+    ? 'https://efrisws.ura.go.ug/ws/taapp/getInformation'
+    : 'https://efristest.ura.go.ug/efrisws/ws/taapp/getInformation';
+  try {
+    const session = await getSession(config.tin, config.deviceNo, config.efrisPassword, eu);
+    if (!session.aesKey) throw new Error('No AES key for T144');
+    const t144data = {
+      tin: config.tin, startDate, endDate,
+      pageNo: String(pageNo || '1'),
+      pageSize: String(Math.min(parseInt(pageSize) || 20, 99)),
+      buyerTin: buyerTin || '', referenceNo: referenceNo || '', buyerLegalName: '',
+    };
+    const t144 = await efrisCall(eu, efrisEnvEnc('T144', t144data, config.tin, config.deviceNo, session.aesKey, session.privatePem));
+    const rc = t144.data && t144.data.returnStateInfo ? t144.data.returnStateInfo.returnCode : null;
+    const rm = t144.data && t144.data.returnStateInfo ? t144.data.returnStateInfo.returnMessage : '';
+    let records = [], page = {};
+    if (t144.data && t144.data.data && t144.data.data.content) {
+      try {
+        const s = aesDecryptStr(t144.data.data.content, session.aesKey);
+        const d = JSON.parse(s);
+        records = d.records || d.invoiceList || d.list || [];
+        page = d.page || { pageNo: 1, pageCount: 1, totalSize: records.length };
+        console.log('   T144 report: ' + records.length + ' records');
+      } catch(e) { console.log('   T144 parse error:', e.message); }
+    }
+    const ok = rc === '00' || records.length > 0;
+    res.json(ok
+      ? { success: true, records, page, returnCode: rc }
+      : { success: false, error: 'URA ' + rc + ': ' + rm, returnCode: rc });
+  } catch(e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ── Stock-in (T131) ───────────────────────────────────────────
+app.post('/api/efris/stock-in', async (req, res) => {
+  const { supplierName, supplierTin, stockInDate, stockInType, branchId, remarks, productionBatchNo, productionDate, items, config } = req.body || {};
+  if (!items || !items.length || !config || !config.tin) return res.status(400).json({ success: false, error: 'items and config required' });
+  const eu = config.mode === 'production'
+    ? 'https://efrisws.ura.go.ug/ws/taapp/getInformation'
+    : 'https://efristest.ura.go.ug/efrisws/ws/taapp/getInformation';
+  try {
+    const session = await getSession(config.tin, config.deviceNo, config.efrisPassword, eu);
+    if (!session.aesKey) throw new Error('No AES key for T131');
+    const t131data = {
+      supplierName: supplierName || '', supplierTin: supplierTin || '',
+      remarks: remarks || '', branchId: branchId || '',
+      stockInDate: stockInDate || new Date().toISOString().slice(0, 10),
+      stockInType: stockInType || '104',
+      productionBatchNo: productionBatchNo || '', productionDate: productionDate || '',
+      stockInItem: items.map(item => ({
+        itemCode: String(item.itemCode || ''), quantity: String(item.quantity || 1),
+        unitPrice: String(item.unitPrice || 0), measureUnit: item.measureUnit || '',
+      })),
+    };
+    const t131 = await efrisCall(eu, efrisEnvEnc('T131', t131data, config.tin, config.deviceNo, session.aesKey, session.privatePem));
+    const rc = t131.data && t131.data.returnStateInfo ? t131.data.returnStateInfo.returnCode : null;
+    const rm = t131.data && t131.data.returnStateInfo ? t131.data.returnStateInfo.returnMessage : '';
+    let errors = [];
+    if (t131.data && t131.data.data && t131.data.data.content) {
+      try { const s = aesDecryptStr(t131.data.data.content, session.aesKey); const d = JSON.parse(s); errors = d.errors || []; } catch(e) {}
+    }
+    const ok = rc === '00' || rc === '45';
+    res.json(ok
+      ? { success: rc === '00', partialErrors: errors, returnCode: rc, returnMessage: rm }
+      : { success: false, error: 'URA ' + rc + ': ' + rm, returnCode: rc });
+  } catch(e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ── Stock Adjust (T132) ───────────────────────────────────────
+app.post('/api/efris/stock-adjust', async (req, res) => {
+  const { adjustDate, adjustType, branchId, remarks, items, config } = req.body || {};
+  if (!items || !items.length || !config || !config.tin) return res.status(400).json({ success: false, error: 'items and config required' });
+  const eu = config.mode === 'production'
+    ? 'https://efrisws.ura.go.ug/ws/taapp/getInformation'
+    : 'https://efristest.ura.go.ug/efrisws/ws/taapp/getInformation';
+  try {
+    const session = await getSession(config.tin, config.deviceNo, config.efrisPassword, eu);
+    if (!session.aesKey) throw new Error('No AES key for T132');
+    const t132data = {
+      remarks: remarks || '', branchId: branchId || '',
+      adjustDate: adjustDate || new Date().toISOString().slice(0, 10),
+      adjustType: adjustType || '102',
+      stockInItem: items.map(item => ({
+        itemCode: String(item.itemCode || ''), quantity: String(item.quantity || 1),
+        unitPrice: String(item.unitPrice || 0), measureUnit: item.measureUnit || '',
+      })),
+    };
+    const t132 = await efrisCall(eu, efrisEnvEnc('T132', t132data, config.tin, config.deviceNo, session.aesKey, session.privatePem));
+    const rc = t132.data && t132.data.returnStateInfo ? t132.data.returnStateInfo.returnCode : null;
+    const rm = t132.data && t132.data.returnStateInfo ? t132.data.returnStateInfo.returnMessage : '';
+    let errors = [];
+    if (t132.data && t132.data.data && t132.data.data.content) {
+      try { const s = aesDecryptStr(t132.data.data.content, session.aesKey); const d = JSON.parse(s); errors = d.errors || []; } catch(e) {}
+    }
+    const ok = rc === '00' || rc === '45';
+    res.json(ok
+      ? { success: rc === '00', partialErrors: errors, returnCode: rc, returnMessage: rm }
       : { success: false, error: 'URA ' + rc + ': ' + rm, returnCode: rc });
   } catch(e) {
     res.status(500).json({ success: false, error: e.message });
