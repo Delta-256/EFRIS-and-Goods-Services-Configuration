@@ -292,6 +292,7 @@
       <div style="font-size:10px;text-transform:uppercase;color:var(--txtl);letter-spacing:.4px;">Fiscal Document Number (FDN)</div>
       <div class="fdn" id="rFDN"></div>
       <div style="font-size:11px;margin-top:4px;">Antifake Code: <strong id="rAF">&mdash;</strong></div>
+      <div id="rQR" style="margin-top:8px;"></div>
       <hr><div id="mgrSave"></div>
     </div>
     <div class="card hidden" id="errCard">
@@ -837,6 +838,7 @@ async function doSubmit(){
     steps[1].st='don';steps[2].st='don';steps[3].st=d1.success?'don':'err';setProg(steps);
     if(!d1.success)throw new Error(d1.error||'EFRIS submission failed');
     sh('rCard');tx('rFDN',d1.fdn||'—');tx('rAF',d1.antifakeCode||'—');
+    ht('rQR',d1.qrCode?'<img src="'+esc(d1.qrCode)+'" alt="QR Code" style="width:100px;height:100px;margin-top:4px;" onerror="this.style.display=\'none\'"/>':'');
     steps[4].st='act';setProg(steps);
     await saveMgr(d1.fdn,d1.qrCode,d1.antifakeCode,d1.deviceNo,d1.issuedDate,d1.invoiceId);
     steps[4].st='don';setProg(steps);
@@ -907,6 +909,7 @@ async function doCreditNote(){
     sh('rCard');
     ht('rFDN','<span style="color:#c62828;">&#8617; CREDIT NOTE</span> '+esc(d1.fdn||'—'));
     tx('rAF',d1.antifakeCode||'—');
+    ht('rQR',d1.qrCode?'<img src="'+esc(d1.qrCode)+'" alt="QR Code" style="width:100px;height:100px;margin-top:4px;" onerror="this.style.display=\'none\'"/>':'');
     // Step 2: Create credit note record in Manager
     const ep=CFG.managerEndpoint||MGR_EP, tk=CFG.accessToken||MGR_TK;
     let cnKey=null;
@@ -1992,6 +1995,7 @@ async function doCreateReceipt(managerOnly){
     steps[3].st='don'; prog();
     renderInv(INV); showScr('sMain');
     sh('rCard'); tx('rFDN',sd.fdn||'—'); tx('rAF',sd.antifakeCode||'—');
+    ht('rQR',sd.qrCode?'<img src="'+esc(sd.qrCode)+'" alt="QR Code" style="width:100px;height:100px;margin-top:4px;" onerror="this.style.display=\'none\'"/>':'');
   }catch(err){
     console.error(err);
     const s=steps.find(x=>x.st==='act'); if(s)s.st='err'; prog();
