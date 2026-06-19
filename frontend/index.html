@@ -185,7 +185,7 @@
     <div class="ob" id="ob4">
       <div class="al ai"><strong>Manager.io Connection</strong></div>
       <div class="al as">&#10003; Relay server is running &mdash; this page is served by it.</div>
-      <div class="fg"><label>Manager.io API Endpoint *</label><div style="display:flex;gap:6px;align-items:flex-start;"><input id="o4a" value="http://localhost:8090/api2" style="flex:1;"/><button type="button" class="btn bo bsm" onclick="detectManagerEndpoint()" id="detectBtn" style="white-space:nowrap;margin-top:1px;">&#128270; Auto-detect</button></div><div class="hint">Desktop: <code>http://localhost:8080/api2</code> or <code>http://localhost:8090/api2</code> &nbsp;|&nbsp; Server / Docker: <code>https://your-domain.com/api2</code> (use <strong>https:</strong> for remote servers). Click Auto-detect to find a local installation automatically.</div></div>
+      <div class="fg"><label>Manager.io API Endpoint *</label><div style="display:flex;gap:6px;align-items:flex-start;"><input id="o4a" placeholder="e.g. http://localhost:8080/api2" style="flex:1;"/><button type="button" class="btn bo bsm" onclick="detectManagerEndpoint()" id="detectBtn" style="white-space:nowrap;margin-top:1px;">&#128270; Auto-detect</button></div><div class="hint">Desktop: default port is <code>8080</code> — use Auto-detect if unsure of your port &nbsp;|&nbsp; Server / Docker: <code>https://your-domain.com/api2</code> — always use <strong>https:</strong> for remote servers. The port depends on how your installation was configured.</div></div>
       <div id="detectResult" style="font-size:12px;margin:-4px 0 6px;"></div>
       <div class="fg"><label>Access Token *</label><input id="o4b" placeholder="Paste your Manager API token here"/><div class="hint">In Manager: Settings → API Keys → Add Key → copy the token. ⚠ You only see the token once — copy it immediately.</div></div>
       <button class="btn bgld" onclick="testMgr('o4a','o4b','mgrR')">&#128279; Test Manager Connection</button>
@@ -752,10 +752,10 @@
       <div class="gs"><div class="gn">2</div><div class="gb">
         <h4>Get your Manager.io Endpoint URL</h4>
         <p>This is the address EFRISConnect uses to talk to Manager. Common values:<br>
-        <code>http://localhost:8080/api2</code> — Manager desktop (older versions)<br>
-        <code>http://localhost:8090/api2</code> — Manager desktop (newer) or Docker<br>
+        <code>http://localhost:8080/api2</code> — Manager desktop (default port)<br>
+        <code>http://localhost:YOUR-PORT/api2</code> — Desktop/Docker with a custom port (use Auto-detect if unsure)<br>
         <code>https://your-domain.com/api2</code> — Manager Server Edition (always use <strong>https:</strong> for remote servers — http will redirect and fail)<br>
-        <em>💡 Not sure? Click <strong>Auto-detect</strong> in Settings to scan common local ports automatically.</em></p>
+        <em>💡 Not sure of your port? Click <strong>Auto-detect</strong> in Settings — it will scan common ports and fill in the right one automatically.</em></p>
       </div></div>
 
       <div class="gs"><div class="gn">3</div><div class="gb">
