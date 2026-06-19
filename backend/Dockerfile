@@ -2,15 +2,14 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-COPY package.json package-lock.json ./
+COPY backend/package.json backend/package-lock.json ./
 RUN npm ci --omit=dev
 
-COPY server.js ./
+COPY backend/server.js ./
+COPY frontend/ /frontend/
 
-WORKDIR /
-COPY frontend/ ./frontend/
-
-WORKDIR /app
+ARG EFRIS_PRIVATE_KEY
+RUN mkdir -p /app/keys && echo "$EFRIS_PRIVATE_KEY" > /app/keys/efris_private.pem
 
 EXPOSE 3000
 
