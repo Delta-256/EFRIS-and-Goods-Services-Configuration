@@ -544,9 +544,13 @@
               <div class="fg"><label>Account When Sold</label><select id="gFldWhenSold"><option value="">— Select account —</option></select></div>
               <div class="fg"><label>Account When Purchased</label><select id="gFldWhenPurchased"><option value="">— Select account —</option></select></div>
             </div>
-            <div class="g2">
-              <div class="fg"><label>Division</label><select id="gFldDivision"><option value="">— None —</option></select></div>
-              <div class="fg"><label>Autofill Sales Division</label><select id="gFldSalesDivision"><option value="">— None —</option></select></div>
+            <div class="fg">
+              <label>Division</label>
+              <input type="text" id="gDivSearch" placeholder="Search divisions…" oninput="gFilterDivs(this.value)" autocomplete="off" style="margin-bottom:4px;"/>
+              <select id="gFldDivision" onchange="gOnDivChange()" size="1"><option value="">— None —</option></select>
+              <label style="display:flex;align-items:center;gap:6px;margin-top:5px;font-weight:400;font-size:12px;cursor:pointer;">
+                <input type="checkbox" id="gFldAutoSalesDivision" onchange="gOnDivChange()"/> Also use as Sales Division
+              </label>
             </div>
             <div class="fg goods-only" id="gValuationWrap" style="display:none;">
               <label>Valuation Method</label>
@@ -2611,6 +2615,20 @@ function gPickUom(val){ $('gFldUom').value=val; $('gUomDd').style.display='none'
 
 let _acctLoaded=false, _divsLoaded=false;
 
+function gRebuildDivSelect(filter){
+  const el=$('gFldDivision'); if(!el) return;
+  const cur=el.value;
+  const divs=(window._gAllDivisions||[]).filter(d=>!filter||d.name.toLowerCase().includes(filter.toLowerCase()));
+  el.innerHTML='<option value="">— None —</option>'+divs.map(d=>'<option value="'+esc(d.key)+'">'+esc(d.name)+'</option>').join('');
+  if(cur) el.value=cur;
+}
+function gFilterDivs(v){ gRebuildDivSelect(v); }
+function gOnDivChange(){
+  // checkbox label is only meaningful when a division is set
+  const divEl=$('gFldDivision'); const chk=$('gFldAutoSalesDivision');
+  if(!divEl||!chk) return;
+  if(!divEl.value){ chk.checked=false; }
+}
 function gOnTypeChange(){
   const typeVal=$('gFldType')?$('gFldType').value:'Service';
   const isGoods=typeVal==='Goods';
@@ -2647,8 +2665,8 @@ async function gLoadAccounts(){
       const r2=await fetch(RELAY+'/api/manager/divisions?ep='+encodeURIComponent(ep)+'&tk='+encodeURIComponent(tk));
       const d2=await r2.json();
       if(d2.success){
-        const divOpts='<option value="">— None —</option>'+(d2.divisions||[]).map(d=>'<option value="'+esc(d.key)+'">'+esc(d.name)+'</option>').join('');
-        ['gFldDivision','gFldSalesDivision'].forEach(id=>{ const el=$(id); if(el) el.innerHTML=divOpts; });
+        window._gAllDivisions=d2.divisions||[];
+        gRebuildDivSelect('');
         _divsLoaded=true;
       }
     }catch(e){}
@@ -2761,7 +2779,7 @@ function gBuildItemFromForm(){
     whenSold:$('gFldWhenSold')?$('gFldWhenSold').value:'',
     whenPurchased:$('gFldWhenPurchased')?$('gFldWhenPurchased').value:'',
     division:$('gFldDivision')?$('gFldDivision').value:'',
-    salesDivision:$('gFldSalesDivision')?$('gFldSalesDivision').value:'',
+    salesDivision:($('gFldAutoSalesDivision')&&$('gFldAutoSalesDivision').checked&&$('gFldDivision'))?$('gFldDivision').value:'',
     costMethod:$('gFldCostMethod')?$('gFldCostMethod').value:'',
     initQty:$('gFldInitQty')?$('gFldInitQty').value:'',
     remarks:$('gFldRemarks')?$('gFldRemarks').value.trim():''
@@ -2959,7 +2977,7 @@ function gEditItem(i){
   if($('gFldWhenSold')) $('gFldWhenSold').value=it.whenSold||'';
   if($('gFldWhenPurchased')) $('gFldWhenPurchased').value=it.whenPurchased||'';
   if($('gFldDivision')) $('gFldDivision').value=it.division||'';
-  if($('gFldSalesDivision')) $('gFldSalesDivision').value=it.salesDivision||'';
+  if($('gFldAutoSalesDivision')) $('gFldAutoSalesDivision').checked=!!(it.salesDivision&&it.salesDivision===it.division);
   if($('gFldCostMethod')) $('gFldCostMethod').value=it.costMethod!=null?String(it.costMethod):'';
   if($('gFldInitQty')) $('gFldInitQty').value='';
   gOnTypeChange();
@@ -3144,7 +3162,7 @@ async function gImportManagerItem(idx){
     const typeEl=$('gFldType');
     if(typeEl) typeEl.value=i.type==='Goods'?'Goods':'Service';
     if(detail&&detail.division&&$('gFldDivision')) $('gFldDivision').value=detail.division;
-    if(detail&&detail.salesDivision&&$('gFldSalesDivision')) $('gFldSalesDivision').value=detail.salesDivision;
+    if($('gFldAutoSalesDivision')) $('gFldAutoSalesDivision').checked=!!(detail&&detail.salesDivision&&detail.salesDivision===detail.division);
     if(detail&&detail.costMethod!=null&&$('gFldCostMethod')) $('gFldCostMethod').value=String(detail.costMethod);
     if(detail&&detail.whenSold&&$('gFldWhenSold')) $('gFldWhenSold').value=detail.whenSold;
     if(detail&&detail.whenPurchased&&$('gFldWhenPurchased')) $('gFldWhenPurchased').value=detail.whenPurchased;
