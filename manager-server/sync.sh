@@ -2,7 +2,7 @@
 # Incremental sync from /data to OneDrive (or Google Drive)
 # Only transfers changed files — efficient for large .manager files
 
-REMOTE="${RCLONE_REMOTE:-onedrive:ManagerBackup}"
+REMOTE="${RCLONE_REMOTE:-gdrive:ManagerBackup}"
 LOCAL="/data"
 
 echo "[$(date)] Starting sync: $LOCAL → $REMOTE"
