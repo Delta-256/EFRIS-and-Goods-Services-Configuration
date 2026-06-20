@@ -16,6 +16,18 @@ const HTTPS_PORT = 5443;
 app.use(cors({ origin:'*', methods:['GET','POST','PUT','DELETE','OPTIONS'], allowedHeaders:['Content-Type','Authorization','X-API-KEY'] }));
 app.use(express.json());
 
+// ── Internal API key — protects all /api/* routes from outside callers ──
+// Set INTERNAL_API_KEY env var for a stable key; otherwise a random key is
+// generated at startup (injected into the served HTML so the SPA can use it).
+const API_KEY = process.env.INTERNAL_API_KEY || crypto.randomBytes(32).toString('hex');
+app.use('/api', (req, res, next) => {
+  if (req.path === '/health') return next(); // health check must stay public
+  if (req.headers['x-api-key'] !== API_KEY) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  next();
+});
+
 // Load frontend HTML at startup — used as /extension and SPA
 let EXTENSION_HTML = '';
 try {
@@ -109,7 +121,8 @@ function managerCall(endpoint, token, method, docPath, body) {
 
 function normEp(ep) {
   ep = (ep || '').trim().replace(/\/+$/, '');
-  if (ep.endsWith('/api4')) ep = ep.slice(0, -5) + '/api2';
+  // api4 is a different protocol — don't silently rewrite it; surface the issue
+  if (ep.endsWith('/api4')) throw new Error('Manager API v4 endpoints (/api4) are not yet supported. Please use your /api2 endpoint URL instead.');
   else if (ep.endsWith('/api')) ep = ep + '2';
   else if (!ep.endsWith('/api2')) ep = ep + '/api2';
   return ep;
@@ -234,7 +247,7 @@ let _pemContentFromEnv = null;
 if (_pkEnv.trim().startsWith('-----BEGIN')) { _pemContentFromEnv = _pkEnv.replace(/\\n/g, '\n'); }
 const EFRIS_PRIVATE_KEY_PATHS = _pkEnv && !_pemContentFromEnv
   ? [_pkEnv]
-  : ['/app/keys/efris_private.pem', 'F:\\EFRIS_Keys\\efris_private_v2.pem', 'F:\\EFRIS_Keys\\efris_private.pem'];
+  : ['/app/keys/efris_private.pem'];
 
 function loadPem(p) {
   if (_pemContentFromEnv) return _pemContentFromEnv;
@@ -1257,7 +1270,7 @@ app.post('/api/efris/submit-invoice', async (req, res) => {
       try { contentStr = aesDecryptStr(t109.data.data.content, session.aesKey); }
       catch(e) { try { contentStr = Buffer.from(t109.data.data.content, 'base64').toString('utf8'); } catch(_) {} }
     }
-    let fdn = null, qrCode = null, antifakeCode = null;
+    let fdn = null, qrCode = null, antifakeCode = null, invoiceId = '';
     try {
       if (contentStr) {
         const d = JSON.parse(contentStr);
@@ -1268,7 +1281,7 @@ app.post('/api/efris/submit-invoice', async (req, res) => {
         antifakeCode = d.antiFakeCode || d.antifakeCode || bi.antifakeCode || bi.antiFakeCode;
         const issuedDate = bi.issuedDate || bi.issueDate || d.issuedDate || '';
         const deviceNo = bi.deviceNo || bi.deviceNumber || d.deviceNo || config.deviceNo || '';
-        const invoiceId = bi.invoiceId || bi.invoiceID || d.invoiceId || '';
+        invoiceId = bi.invoiceId || bi.invoiceID || d.invoiceId || '';
         // Build the EFRIS validation URL — this is what gets encoded as the QR code on official EFRIS documents
         const efrisPortal = config.mode === 'production'
           ? 'https://efris.ura.go.ug/site_mobile/#/invoiceValidation'
@@ -1377,6 +1390,7 @@ app.post('/api/efris/my-details', async (req, res) => {
 app.post('/api/efris/credit-note', async (req, res) => {
   const { originalFDN, originalInvoiceId, reasonCode, reason, remarks, referenceNo, items, config } = req.body || {};
   if (!originalFDN || !config || !config.tin) return res.status(400).json({ success: false, error: 'originalFDN and config required' });
+  if (!originalInvoiceId) return res.status(400).json({ success: false, error: 'Credit note requires the original invoice ID (oriInvoiceId). Enter the original FDN in the "Fiscal Document Number" custom field on the original invoice before raising a credit note.' });
   const eu = config.mode === 'production'
     ? 'https://efrisws.ura.go.ug/ws/taapp/getInformation'
     : 'https://efristest.ura.go.ug/efrisws/ws/taapp/getInformation';
@@ -1949,11 +1963,16 @@ app.post('/api/number-series/:id/next', (req, res) => {
 // ══════════════════════════════════════════════════════════════
 //  /extension ROUTE — serve EXTENSION_HTML
 // ══════════════════════════════════════════════════════════════
+// Inject API key into any HTML page we serve
+function injectApiKey(html) {
+  return html.replace('</head>', `<script>window.__API_KEY="${API_KEY}";</script></head>`);
+}
+
 app.get('/extension', (req, res) => {
   res.setHeader('X-Frame-Options', 'ALLOWALL');
   res.setHeader('Content-Security-Policy', 'frame-ancestors *');
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.send(EXTENSION_HTML);
+  res.send(injectApiKey(EXTENSION_HTML));
 });
 
 // ── Static files and SPA fallback ────────────────────────────
@@ -1967,7 +1986,13 @@ app.get('/receipt', (req, res) => {
 
 app.get('*', (req, res) => {
   if (!req.path.startsWith('/api/') && req.path !== '/extension') {
-    res.sendFile(path.join(FRONTEND, 'index.html'));
+    try {
+      const html = fs.readFileSync(path.join(FRONTEND, 'index.html'), 'utf8');
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.send(injectApiKey(html));
+    } catch(e) {
+      res.status(500).send('Frontend not found');
+    }
   }
 });
 

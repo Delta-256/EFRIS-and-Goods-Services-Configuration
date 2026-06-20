@@ -146,7 +146,7 @@
     </svg>
   </span>
   <div><h1>EFRISConnect</h1><div class="sub">URA Electronic Fiscal Receipting &amp; Invoicing</div></div>
-  <span class="badge bsb" id="mBadge">SANDBOX</span>
+  <span class="badge bsb" id="mBadge" style="display:none;">SANDBOX</span>
 </div>
 <div class="wrap">
 
@@ -352,6 +352,8 @@
             <option value="EUR">EUR — Euro</option>
             <option value="GBP">GBP — British Pound</option>
             <option value="KES">KES — Kenya Shilling</option>
+            <option value="TZS">TZS — Tanzania Shilling</option>
+            <option value="RWF">RWF — Rwanda Franc</option>
           </select>
         </div>
       </div>
@@ -418,7 +420,7 @@
     <div class="card">
       <div class="ct">&#9654; Bulk Submit to EFRIS</div>
       <p style="font-size:12px;color:var(--gray);margin:0 0 10px;">Enter Manager invoice IDs (one per line). Each will be loaded and submitted to EFRIS in sequence.</p>
-      <textarea id="bulkIds" rows="6" placeholder="INV-0001&#10;INV-0002&#10;INV-0003" style="width:100%;box-sizing:border-box;font-family:monospace;font-size:12px;padding:8px;border:1px solid var(--brd);border-radius:6px;resize:vertical;"></textarea>
+      <textarea id="bulkIds" rows="6" placeholder="INV-0001&#10;INV-0002&#10;INV-0003" style="width:100%;box-sizing:border-box;font-family:monospace;font-size:12px;padding:8px;border:1px solid var(--bdr);border-radius:6px;resize:vertical;"></textarea>
       <div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;">
         <button class="btn bsm" id="bulkStartBtn" onclick="bulkStart()">&#9654; Start Bulk Submit</button>
         <button class="btn bo bsm" onclick="bulkClear()">Clear</button>
@@ -1087,6 +1089,18 @@
 const RELAY = window.location.protocol + '//' + window.location.host;
 const SKEY = 'efris_v3';
 let CFG={}, INV=null, DKEY=null, MGR_EP=null, MGR_TK=null, _lastInvKey=null, _invDebounce=null;
+
+// Intercept all /api fetches to attach the server-injected API key
+(function(){
+  const _orig=window.fetch;
+  window.fetch=function(url,opts){
+    opts=opts||{};
+    if(typeof url==='string'&&url.includes('/api/')&&window.__API_KEY){
+      opts.headers=Object.assign({'X-API-KEY':window.__API_KEY},opts.headers||{});
+    }
+    return _orig.call(this,url,opts);
+  };
+})();
 const TG={vatReg:false,sandbox:true,gRegEfris:false,efrisEnabled:true};
 let obStep=1;
 
@@ -1150,7 +1164,11 @@ function finOB(){
 }
 function apCFG(){
   const b=$('mBadge');
-  if(b){b.textContent=CFG.sandbox?'SANDBOX':'PRODUCTION';b.className='badge '+(CFG.sandbox?'bsb':'bprd');}
+  if(b){
+    b.textContent=CFG.sandbox?'SANDBOX':'PRODUCTION';
+    b.className='badge '+(CFG.sandbox?'bsb':'bprd');
+    b.style.display=CFG.sandbox?'':'none'; // only show badge in sandbox mode
+  }
   sv('sLeg',CFG.legalName);sv('sTrd',CFG.tradeName);sv('sAdr',CFG.address);sv('sPh',CFG.phone);sv('sEm',CFG.email);
   const logoVal=CFG.logoUrl||'';
   if(logoVal.startsWith('data:')){ sv('sLogo',''); } else { sv('sLogo',logoVal); }
@@ -1532,7 +1550,7 @@ async function histLoad(page){
       const fdnLink = e.validationUrl
         ? '<a href="'+esc(e.validationUrl)+'" target="_blank" style="color:var(--ac);font-family:monospace;font-size:11px;">'+esc(e.fdn||'—')+'</a>'
         : '<span style="font-family:monospace;font-size:11px;">'+esc(e.fdn||'—')+'</span>';
-      h += '<tr style="border-bottom:1px solid var(--brd);">'
+      h += '<tr style="border-bottom:1px solid var(--bdr);">'
         + '<td style="padding:5px 8px;white-space:nowrap;">'+dt+'</td>'
         + '<td style="padding:5px 8px;">'+fdnLink+'</td>'
         + '<td style="padding:5px 8px;font-family:monospace;font-size:11px;">'+esc(e.invoiceId||'—')+'</td>'
@@ -1611,7 +1629,7 @@ function wkRenderLines(){
     +'</tr></thead><tbody>';
   _wkLines.forEach((l,i)=>{
     const tot=Math.round(((l.qty||1)*(l.price||0)*(1+(l.vatRate||0)/100)-(l.discount||0))*100)/100;
-    h+='<tr style="border-bottom:1px solid var(--brd);">'
+    h+='<tr style="border-bottom:1px solid var(--bdr);">'
       +'<td style="padding:3px 4px;position:relative;"><input list="wkItemList" value="'+esc(l.desc)+'" style="width:100%;font-size:12px;" oninput="_wkLines['+i+'].desc=this.value;wkAutoFillItem('+i+',this.value)" placeholder="Item or service description"/></td>'
       +'<td style="padding:3px 4px;"><input type="number" value="'+esc(l.qty)+'" style="width:100%;font-size:12px;text-align:right;" oninput="_wkLines['+i+'].qty=+this.value;wkRecalc();wkUpdateTot('+i+')"/></td>'
       +'<td style="padding:3px 4px;"><input list="wkUnitList" value="'+esc(l.unit)+'" style="width:100%;font-size:12px;" oninput="_wkLines['+i+'].unit=this.value" placeholder="Each"/></td>'
@@ -1731,11 +1749,11 @@ function wkRecalc(){
   const total=subtotal+vatTotal-discTotal;
   const curr=(document.getElementById('wkCurr')||{}).value||'UGX';
   const fx=parseFloat((document.getElementById('wkFxVal')||{}).value||'1')||1;
-  let h='<div style="display:inline-block;border:1px solid var(--brd);border-radius:6px;padding:8px 14px;font-size:12px;">';
+  let h='<div style="display:inline-block;border:1px solid var(--bdr);border-radius:6px;padding:8px 14px;font-size:12px;">';
   h+='<div style="display:flex;justify-content:space-between;gap:30px;"><span>Subtotal</span><strong>'+curr+' '+fn(subtotal)+'</strong></div>';
   if(vatTotal) h+='<div style="display:flex;justify-content:space-between;gap:30px;"><span>VAT</span><strong>'+curr+' '+fn(vatTotal)+'</strong></div>';
   if(discTotal) h+='<div style="display:flex;justify-content:space-between;gap:30px;"><span>Discount</span><strong>−'+curr+' '+fn(discTotal)+'</strong></div>';
-  h+='<div style="display:flex;justify-content:space-between;gap:30px;border-top:1px solid var(--brd);margin-top:4px;padding-top:4px;font-size:13px;"><span><strong>Total</strong></span><strong>'+curr+' '+fn(total)+'</strong></div>';
+  h+='<div style="display:flex;justify-content:space-between;gap:30px;border-top:1px solid var(--bdr);margin-top:4px;padding-top:4px;font-size:13px;"><span><strong>Total</strong></span><strong>'+curr+' '+fn(total)+'</strong></div>';
   if(curr!=='UGX'&&fx>1) h+='<div style="color:var(--gray);font-size:10px;margin-top:2px;">≈ UGX '+fn(total*fx)+'</div>';
   h+='</div>';
   ht('wkTotals',h);
@@ -1897,7 +1915,7 @@ async function bulkStart(){
       + '<th style="padding:5px 8px;">Detail</th>'
       + '</tr></thead><tbody>';
     rows.forEach((r,i)=>{
-      h += '<tr style="border-bottom:1px solid var(--brd);">'
+      h += '<tr style="border-bottom:1px solid var(--bdr);">'
         + '<td style="padding:4px 8px;color:var(--gray);">'+(i+1)+'</td>'
         + '<td style="padding:4px 8px;font-family:monospace;">'+esc(r.id)+'</td>'
         + '<td style="padding:4px 8px;">'+icons[r.status]+' '+esc(r.status)+'</td>'
@@ -3550,7 +3568,7 @@ function cnRenderItems(){
   const el=$('cnItems'); if(!el) return;
   let h='<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:4px;"><thead><tr style="background:var(--bg2);"><th style="padding:4px 6px;text-align:left;">Item Code</th><th style="padding:4px 6px;width:60px;">Qty</th><th style="padding:4px 6px;width:90px;">Unit Price</th><th style="padding:4px 6px;width:50px;">Line #</th><th></th></tr></thead><tbody>';
   _cnItems.forEach((it,i)=>{
-    h+='<tr style="border-bottom:1px solid var(--brd);"><td style="padding:3px;"><input value="'+esc(it.itemCode)+'" style="width:100%;font-size:12px;" oninput="_cnItems['+i+'].itemCode=this.value" placeholder="e.g. ITEM001"/></td>'
+    h+='<tr style="border-bottom:1px solid var(--bdr);"><td style="padding:3px;"><input value="'+esc(it.itemCode)+'" style="width:100%;font-size:12px;" oninput="_cnItems['+i+'].itemCode=this.value" placeholder="e.g. ITEM001"/></td>'
       +'<td style="padding:3px;"><input type="number" value="'+it.quantity+'" style="width:100%;font-size:12px;" oninput="_cnItems['+i+'].quantity=+this.value"/></td>'
       +'<td style="padding:3px;"><input type="number" value="'+it.unitPrice+'" style="width:100%;font-size:12px;" oninput="_cnItems['+i+'].unitPrice=+this.value"/></td>'
       +'<td style="padding:3px;"><input type="number" value="'+it.orderNumber+'" style="width:100%;font-size:12px;" oninput="_cnItems['+i+'].orderNumber=+this.value"/></td>'
@@ -3616,7 +3634,7 @@ async function efrisReportLoad(page){
     recs.forEach(rec=>{
       const amt=rec.grossAmount?Number(rec.grossAmount).toLocaleString('en-UG',{maximumFractionDigits:0}):'—';
       const tax=rec.taxAmount?Number(rec.taxAmount).toLocaleString('en-UG',{maximumFractionDigits:0}):'—';
-      h+='<tr style="border-bottom:1px solid var(--brd);">'
+      h+='<tr style="border-bottom:1px solid var(--bdr);">'
         +'<td style="padding:4px 6px;white-space:nowrap;">'+esc(rec.issuedDateStr||rec.issuedDate||'—')+'</td>'
         +'<td style="padding:4px 6px;font-family:monospace;font-size:10px;">'+esc(rec.invoiceNo||'—')+'</td>'
         +'<td style="padding:4px 6px;">'+esc(((rec.buyerLegalName||rec.buyerBusinessName||'—')).slice(0,22))+'</td>'
@@ -3682,7 +3700,7 @@ function stkRenderItems(type){
   let h='<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:4px;"><thead><tr style="background:var(--bg2);"><th style="padding:4px;text-align:left;">Item Code</th><th style="padding:4px;width:70px;">Qty</th><th style="padding:4px;width:100px;">Unit Cost</th><th></th></tr></thead><tbody>';
   const ar=type==='in'?'_stkInItems':'_stkAdjItems';
   arr.forEach((it,i)=>{
-    h+='<tr style="border-bottom:1px solid var(--brd);">'
+    h+='<tr style="border-bottom:1px solid var(--bdr);">'
       +'<td style="padding:3px;"><input value="'+esc(it.itemCode)+'" style="width:100%;font-size:12px;" oninput="'+ar+'['+i+'].itemCode=this.value" placeholder="Registered EFRIS item code"/></td>'
       +'<td style="padding:3px;"><input type="number" value="'+it.quantity+'" style="width:100%;font-size:12px;" oninput="'+ar+'['+i+'].quantity=+this.value"/></td>'
       +'<td style="padding:3px;"><input type="number" value="'+it.unitPrice+'" style="width:100%;font-size:12px;" oninput="'+ar+'['+i+'].unitPrice=+this.value"/></td>'
