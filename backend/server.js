@@ -274,7 +274,7 @@ async function normalizeInvoice(ep, tk, key) {
 let _pemContentFromEnv = null;
 const _pkB64 = process.env.EFRIS_PRIVATE_KEY_B64 || '';
 if (_pkB64) {
-  _pemContentFromEnv = Buffer.from(_pkB64, 'base64').toString('utf8');
+  _pemContentFromEnv = Buffer.from(_pkB64, 'base64').toString('utf8').replace(/\r/g, '');
 } else {
   const _pkEnv = process.env.EFRIS_PRIVATE_KEY || '';
   if (_pkEnv.trim().startsWith('-----BEGIN')) { _pemContentFromEnv = _pkEnv.replace(/\\n/g, '\n'); }
