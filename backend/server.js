@@ -637,7 +637,22 @@ function buildT109(invoice, cfg) {
 // ══════════════════════════════════════════════════════════════
 
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', uptime: process.uptime() });
+  const b64 = process.env.EFRIS_PRIVATE_KEY_B64 || '';
+  const raw = process.env.EFRIS_PRIVATE_KEY || '';
+  let pemPreview = 'none';
+  if (_pemContentFromEnv) {
+    pemPreview = _pemContentFromEnv.slice(0, 40).replace(/\r?\n/g, '\\n');
+  }
+  res.json({
+    status: 'ok',
+    uptime: process.uptime(),
+    key: {
+      b64_length: b64.length,
+      raw_length: raw.length,
+      pem_loaded: !!_pemContentFromEnv,
+      pem_preview: pemPreview,
+    }
+  });
 });
 
 app.get('/api/segments', (req, res) => {
