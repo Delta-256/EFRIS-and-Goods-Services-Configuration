@@ -332,8 +332,8 @@ function resolveAesKey(passwordDes) {
       try {
         const dec = crypto.privateDecrypt({ key: keyObj, ...pad.opt }, enc);
         const b64 = Buffer.from(dec.toString('utf8').trim(), 'base64');
-        if ([16,24,32].includes(b64.length)) return { key: b64, pem: label, path: label, variant: pad.name + '+base64' };
-        if ([16,24,32].includes(dec.length)) return { key: dec, pem: label, path: label, variant: pad.name + '+raw' };
+        if ([16,24,32].includes(b64.length)) return { key: b64, keyObj, pem: keyObj, path: label, variant: pad.name + '+base64' };
+        if ([16,24,32].includes(dec.length)) return { key: dec, keyObj, pem: keyObj, path: label, variant: pad.name + '+raw' };
         tried.push(label + '/' + pad.name + ': raw ' + dec.length + 'b b64 ' + b64.length + 'b');
       } catch(e) { tried.push(label + '/' + pad.name + ': ' + (e.message||'').slice(0,40)); }
     }
