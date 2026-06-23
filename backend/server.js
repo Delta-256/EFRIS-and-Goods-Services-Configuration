@@ -1579,6 +1579,7 @@ app.post('/api/efris/stock-in', rateLimit(30), async (req, res) => {
       productionBatchNo: productionBatchNo || '', productionDate: productionDate || '',
       stockInItem: items.map(item => ({
         goodsCode:       String(item.goodsCode || item.itemCode || ''),
+        goodsName:       String(item.goodsName || item.goodsCode || item.itemCode || ''),
         quantity:        String(item.quantity || 1),
         unitPrice:       String(item.unitPrice || 0),
         measureUnit:     (item.measureUnit || 'PP').toUpperCase(),
@@ -1588,7 +1589,8 @@ app.post('/api/efris/stock-in', rateLimit(30), async (req, res) => {
     };
     console.log('\n📦 T131 stock-in payload:', JSON.stringify(t131data, null, 2));
     const envelope = efrisEnvEnc('T131', t131data, config.tin, config.deviceNo, session.aesKey, session.privatePem);
-    console.log(`   Encrypted content (first 100 chars): ${envelope.data.content.slice(0, 100)}`);
+    const selfCheck = aesDecryptStr(envelope.data.content, session.aesKey);
+    console.log(`   Self-decrypt check: ${selfCheck.slice(0, 200)}`);
     const t131 = await efrisCall(eu, envelope);
     const rc = t131.data && t131.data.returnStateInfo ? t131.data.returnStateInfo.returnCode : null;
     const rm = t131.data && t131.data.returnStateInfo ? t131.data.returnStateInfo.returnMessage : '';
