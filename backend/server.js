@@ -1581,6 +1581,7 @@ app.post('/api/efris/stock-in', rateLimit(30), async (req, res) => {
       stockInItem: items.map(item => ({
         itemCode: String(item.itemCode || ''), quantity: String(item.quantity || 1),
         unitPrice: String(item.unitPrice || 0), measureUnit: item.measureUnit || '',
+        operationType: '101',
       })),
     };
     const t131 = await efrisCall(eu, efrisEnvEnc('T131', t131data, config.tin, config.deviceNo, session.aesKey, session.privatePem));
