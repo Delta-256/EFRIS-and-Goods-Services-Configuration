@@ -1576,21 +1576,32 @@ app.post('/api/efris/stock-in', rateLimit(30), async (req, res) => {
   try {
     const session = await getSession(config.tin, config.deviceNo, config.efrisPassword, eu);
     if (!session.aesKey) throw new Error('No AES key for T131');
+    // EFRIS T131 requires the header wrapped in `goodsStockIn` and items in
+    // `goodsStockInItem`. operationType lives ONLY in the header (101 = stock-in).
+    // A flat operationType at the root is why rc 2076 ("operationType cannot be
+    // empty") persisted — EFRIS reads goodsStockIn.operationType, not the root.
     const t131data = {
-      operationType:    '101',
-      supplierName:     supplierName || '', supplierTin: supplierTin || '',
-      remarks:          remarks || '', branchId: branchId || '',
-      stockInDate:      (stockInDate || new Date().toISOString().slice(0,10)).replace(/-/g,'/'),
-      stockInType:      stockInType || '104',
-      productionBatchNo: productionBatchNo || '', productionDate: productionDate || '',
-      stockInItem: items.map(item => ({
-        goodsCode:       String(item.goodsCode || item.itemCode || ''),
-        goodsName:       String(item.goodsName || item.goodsCode || item.itemCode || ''),
-        quantity:        String(item.quantity || 1),
-        unitPrice:       String(item.unitPrice || 0),
-        measureUnit:     (item.measureUnit || 'PP').toUpperCase(),
-        operationType:   '101',
-        remainInventory: String(item.quantity || 1),
+      goodsStockIn: {
+        operationType:     '101',
+        supplierTin:       supplierTin || '',
+        supplierName:      supplierName || '',
+        remarks:           remarks || '',
+        stockInDate:       (stockInDate || new Date().toISOString().slice(0,10)).slice(0,10),
+        stockInType:       stockInType || '104',
+        productionBatchNo: productionBatchNo || '',
+        productionDate:    productionDate || '',
+        branchId:          branchId || '',
+        invoiceNo:         '',
+        isCheckBatchNo:    '',
+        rollBackIfError:   '1',
+        goodsTypeCode:     '',
+      },
+      goodsStockInItem: items.map(item => ({
+        goodsCode:   String(item.goodsCode || item.itemCode || ''),
+        measureUnit: (item.measureUnit || 'PP').toUpperCase(),
+        quantity:    String(item.quantity || 1),
+        unitPrice:   String(item.unitPrice || 0),
+        remarks:     '',
       })),
     };
     console.log('\n📦 T131 stock-in payload:', JSON.stringify(t131data, null, 2));
