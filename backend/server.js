@@ -358,8 +358,14 @@ function aesAlgo(keyBytes) {
   return keyBytes.length === 32 ? 'aes-256-ecb' : keyBytes.length === 24 ? 'aes-192-ecb' : 'aes-128-ecb';
 }
 function aesEncryptB64(plain, keyBytes) {
+  // Encrypt to a Buffer and base64-encode the WHOLE ciphertext once. Encoding
+  // update() and final() separately and concatenating the two base64 strings
+  // corrupts the output whenever update() emits a non-multiple-of-3 byte count
+  // (mid-string '=' padding) — which only happens for larger multi-block
+  // payloads like T131 stock-in, causing EFRIS rc 15 "Data decryption error".
   const c = crypto.createCipheriv(aesAlgo(keyBytes), keyBytes, null);
-  return c.update(plain, 'utf8', 'base64') + c.final('base64');
+  const buf = Buffer.concat([c.update(Buffer.from(plain, 'utf8')), c.final()]);
+  return buf.toString('base64');
 }
 function aesDecryptStr(b64, keyBytes) {
   const d = crypto.createDecipheriv(aesAlgo(keyBytes), keyBytes, null);
