@@ -1095,7 +1095,7 @@
       <div id="sEfrisR" class="mt"></div>
     </div>
     <div class="card"><div class="ct"><span class="ico-emoji">&#128279;</span><svg class="ico-svg" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg> System</div>
-      <div class="fg"><label>Manager.io Endpoint</label><input id="sMgr"/></div>
+      <div class="fg"><label>Manager.io Endpoint</label><div style="display:flex;gap:6px;align-items:flex-start;"><input id="sMgr" style="flex:1;"/><button type="button" class="btn bo bsm" onclick="detectManagerEndpointSettings()" id="detectBtnSet" style="white-space:nowrap;margin-top:1px;">&#128270; Auto-detect</button></div><div id="detectResultSet" style="font-size:11px;margin-top:3px;"></div><div class="hint">Desktop edition uses a random port each launch — click Auto-detect, or paste <code>http://127.0.0.1:PORT/api2</code>. Server edition: fixed <code>https://your-domain/api2</code>.</div></div>
       <div class="fg"><label>Access Token</label><input id="sTok"/></div>
       <div class="al ai"><strong>Extension URLs:</strong><br>&#127760; Cloudflare (use this in Manager): <code id="extUrlDisplay">https://YOUR-DOMAIN/extension</code><br>Local HTTP: <code>http://localhost:3000/extension</code></div>
       <div class="trow mt"><div><div class="tlbl">Registered on EFRIS</div><div class="tdsc">Enable fiscal receipting &amp; goods registry features</div></div><div class="tog on" id="sEfris" onclick="tg('sEfris','efrisEnabled');gApplyEfrisMode()"></div></div>
@@ -1335,6 +1335,39 @@ async function detectManagerEndpoint(){
     res.innerHTML='<span style="color:var(--g)">✅ Found Manager at <strong>'+found+'</strong> — endpoint filled in.</span>';
   } else {
     res.innerHTML='<span style="color:var(--red)">No local Manager found. Enter your endpoint manually (e.g. <code>https://your-domain.com/api2</code> for server edition).</span>';
+  }
+}
+
+async function detectManagerEndpointSettings(){
+  const btn=$('detectBtnSet'), res=$('detectResultSet');
+  const tk=gvi('sTok')||CFG.accessToken||'';
+  if(btn){btn.disabled=true;btn.textContent='⏳ Scanning…';}
+  if(res) res.innerHTML='<span style="color:var(--gray)">Trying common local ports…</span>';
+  // Common fixed ports first; Desktop edition uses a random high port, so also let
+  // the user paste it if scanning common ports fails.
+  const candidates=['http://localhost:8080/api2','http://localhost:8090/api2','http://localhost:9090/api2','http://localhost:8888/api2','http://127.0.0.1:8080/api2','http://127.0.0.1:8090/api2'];
+  let found=null;
+  for(const ep of candidates){
+    try{
+      const r=await fetch(RELAY+'/api/manager/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({managerEndpoint:ep,accessToken:tk||'probe'})});
+      const d=await r.json();
+      if(d.success||(d.error&&!d.error.includes('ECONNREFUSED')&&!d.error.includes('ENOTFOUND')&&!d.error.includes('timeout'))){ found=ep; break; }
+    }catch(e){}
+  }
+  if(btn){btn.disabled=false;btn.textContent='🔍 Auto-detect';}
+  if(found){
+    sv('sMgr',found);
+    if(res) res.innerHTML='<span style="color:var(--g)">✅ Found Manager at <strong>'+esc(found)+'</strong> — click Save Settings.</span>';
+    return;
+  }
+  // Fallback: ask for the port (Desktop edition shows it in the Manager app's address bar)
+  const port=prompt('No Manager found on common ports.\n\nManager Desktop uses a random port — find it in the Manager app window title or address bar, then enter just the number here (e.g. 55667):');
+  if(port&&/^\d+$/.test(port.trim())){
+    const ep='http://127.0.0.1:'+port.trim()+'/api2';
+    sv('sMgr',ep);
+    if(res) res.innerHTML='<span style="color:var(--g)">Set to <strong>'+esc(ep)+'</strong> — click Test, then Save Settings.</span>';
+  } else if(res){
+    res.innerHTML='<span style="color:var(--red)">No endpoint set. Paste it manually, e.g. <code>http://127.0.0.1:PORT/api2</code>.</span>';
   }
 }
 
