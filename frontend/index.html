@@ -3254,8 +3254,10 @@ async function t131Search(){
 function stkPreFill(idx){
   // Switch to stock-in pane and pre-fill first item row with this EFRIS item
   const it=(window.__gsResults||[])[idx]; if(!it){return;}
-  // The Stock Management card is hidden by default (only shown while editing a Goods
-  // item). Reveal it so the pre-filled form is visible when launched from search.
+  // The search/results live in the "My Items" sub-tab (gv-lst), but the Stock
+  // Management card lives in the "Configure" sub-tab (gv-cfg). Switch to Configure
+  // first — otherwise the card's parent stays hidden and revealing it does nothing.
+  gSwSub('cfg');
   const card=$('stockMgmtCard'); if(card) card.style.display='';
   stkSwitch('in');
   if(!_stkInItems.length) _stkInItems=[{itemCode:'',quantity:1,unitPrice:0,measureUnit:'PP'}];
