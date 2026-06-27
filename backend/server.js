@@ -1028,6 +1028,21 @@ app.get('/api/manager/accounts', async (req, res) => {
   res.json({ success: true, accounts: [] });
 });
 
+// Diagnostic: fetch one existing text-custom-field's full form so we can learn
+// the exact shape (Placement etc.) required to create EFRIS fields programmatically.
+app.get('/api/manager/custom-field-sample', async (req, res) => {
+  const { ep, tk } = mgrCreds(req);
+  if (!ep || !tk) return res.status(400).json({ success: false, error: 'ep and tk required' });
+  try {
+    const list = await managerCall(ep, tk, 'GET', '/text-custom-fields', null);
+    const arr = (list.data && list.data.textCustomFields) || [];
+    if (!arr.length) return res.json({ success: true, count: 0, sample: null, note: 'No existing text custom fields to clone.' });
+    const key = arr[0].key || arr[0].Key;
+    const form = await managerCall(ep, tk, 'GET', `/text-custom-field-form/${key}`, null);
+    res.json({ success: true, count: arr.length, key, sample: form.data, all: arr.map(f => ({ key: f.key, name: f.name })) });
+  } catch (e) { res.json({ success: false, error: e.message }); }
+});
+
 app.get('/api/manager/divisions', async (req, res) => {
   const { ep, tk } = mgrCreds(req);
   if (!ep || !tk) return res.status(400).json({ success: false, error: 'ep and tk required' });
