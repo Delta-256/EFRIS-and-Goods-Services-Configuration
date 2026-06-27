@@ -358,8 +358,14 @@ function aesAlgo(keyBytes) {
   return keyBytes.length === 32 ? 'aes-256-ecb' : keyBytes.length === 24 ? 'aes-192-ecb' : 'aes-128-ecb';
 }
 function aesEncryptB64(plain, keyBytes) {
+  // Encrypt to a Buffer and base64-encode the WHOLE ciphertext once. Encoding
+  // update() and final() separately and concatenating the two base64 strings
+  // corrupts the output whenever update() emits a non-multiple-of-3 byte count
+  // (mid-string '=' padding) — which only happens for larger multi-block
+  // payloads like T131 stock-in, causing EFRIS rc 15 "Data decryption error".
   const c = crypto.createCipheriv(aesAlgo(keyBytes), keyBytes, null);
-  return c.update(plain, 'utf8', 'base64') + c.final('base64');
+  const buf = Buffer.concat([c.update(Buffer.from(plain, 'utf8')), c.final()]);
+  return buf.toString('base64');
 }
 function aesDecryptStr(b64, keyBytes) {
   const d = crypto.createDecipheriv(aesAlgo(keyBytes), keyBytes, null);
@@ -685,6 +691,16 @@ app.get('/api/health', (req, res) => {
   } else if (_pemContentFromEnv) {
     keyFormat = 'pem';
     try { crypto.createPrivateKey({ key: _pemContentFromEnv, format: 'pem' }); keyOk = true; } catch(e) { keyParseError = e.message; }
+  } else {
+    // Key supplied as a file path (e.g. local dev: EFRIS_PRIVATE_KEY=C:\...\key.pem).
+    // Actually load and parse it so the health report reflects file-based keys too.
+    for (const p of EFRIS_PRIVATE_KEY_PATHS) {
+      const pem = loadPem(p);
+      if (!pem) { keyParseError = path.basename(p) + ': file not found'; continue; }
+      keyFormat = 'pem-file';
+      try { crypto.createPrivateKey({ key: pem, format: 'pem' }); keyOk = true; keyParseError = null; break; }
+      catch(e) { keyParseError = path.basename(p) + ': ' + e.message; }
+    }
   }
   res.json({
     status: 'ok',
@@ -964,21 +980,27 @@ app.get('/api/goods/manager-items', async (req, res) => {
   const { ep, tk } = mgrCreds(req);
   if (!ep || !tk) return res.status(400).json({ success: false, error: 'ep and tk required' });
   try {
+    const cols = '?fields=ItemCode&fields=ItemName&fields=SalePrice&fields=UnitName';
     const [niR, invR] = await Promise.all([
-      managerCall(ep, tk, 'GET', '/non-inventory-items', null),
-      managerCall(ep, tk, 'GET', '/inventory-items', null)
+      managerCall(ep, tk, 'GET', '/non-inventory-items' + cols, null),
+      managerCall(ep, tk, 'GET', '/inventory-items' + cols, null)
     ]);
-    const services = (niR.status === 200 && niR.data && niR.data.nonInventoryItems) || [];
-    const goods    = (invR.status === 200 && invR.data && invR.data.inventoryItems) || [];
-    const normalize = (arr, type) => arr.map(i => ({
-      key:            i.key || i.Key,
-      code:           i.code || i.Code || '',
-      name:           i.itemName || i.name || i.Name || '',
-      unitName:       i.unitName || i.UnitName || '',
-      salesUnitPrice: i.salesUnitPrice || i.SalesUnitPrice || 0,
-      description:    i.description || i.Description || '',
-      type
-    }));
+    const services = (niR.status === 200 && niR.data && (niR.data.nonInventoryItems || niR.data.NonInventoryItems)) || [];
+    const goods    = (invR.status === 200 && invR.data && (invR.data.inventoryItems || invR.data.InventoryItems)) || [];
+    const num = v => { if (v == null) return 0; if (typeof v === 'object') v = v.value != null ? v.value : (v.amount != null ? v.amount : 0); return parseFloat(v) || 0; };
+    const normalize = (arr, type) => arr.map(i => {
+      const price = num(i.SalePrice || i.salePrice || i.salesUnitPrice || i.SalesUnitPrice || i.salesPrice || i.price || i.Price);
+      return {
+        key:            i.key || i.Key,
+        code:           i.ItemCode || i.itemCode || i.code || i.Code || '',
+        name:           i.ItemName || i.itemName || i.name || i.Name || '',
+        unitName:       i.UnitName || i.unitName || '',
+        price:          price,           // frontend (walk-in autofill) reads .price
+        salesUnitPrice: price,
+        description:    i.description || i.Description || '',
+        type
+      };
+    });
     res.json({ success: true, items: [...normalize(services,'Service'), ...normalize(goods,'Goods')] });
   } catch(e) {
     res.json({ success: false, error: e.message });
@@ -988,23 +1010,147 @@ app.get('/api/goods/manager-items', async (req, res) => {
 app.get('/api/manager/accounts', async (req, res) => {
   const { ep, tk } = mgrCreds(req);
   if (!ep || !tk) return res.status(400).json({ success: false, error: 'ep and tk required' });
-  // Try several common Manager account-list endpoints
-  const paths = ['/profit-and-loss-accounts', '/income-statement-accounts', '/balance-sheet-accounts', '/accounts', '/chart-of-accounts'];
+  // Try several common Manager account-list endpoints. Manager API2 uses kebab-case
+  // plural paths (cf. /inventory-items). Different editions expose different names.
+  const paths = ['/profit-and-loss-statement-accounts', '/profit-and-loss-accounts', '/income-statement-accounts', '/balance-sheet-accounts', '/accounts', '/chart-of-accounts'];
   for (const path of paths) {
     try {
       const r = await managerCall(ep, tk, 'GET', path, null);
+      console.log(`   accounts probe ${path} → HTTP ${r.status}`);
       if (r.status === 200 && r.data) {
-        // Find the array inside the response object
-        const arr = Array.isArray(r.data) ? r.data : Object.values(r.data).find(v => Array.isArray(v) && v.length && v[0].key);
+        // Find the array inside the response object (Manager wraps lists under a key)
+        const arr = Array.isArray(r.data)
+          ? r.data
+          : Object.values(r.data).find(v => Array.isArray(v) && v.length && (v[0].key || v[0].Key));
         if (arr && arr.length) {
-          const accounts = arr.map(a => ({ key: a.key || a.Key, name: a.name || a.Name || a.accountName || '' })).filter(a => a.key);
+          const accounts = arr.map(a => ({ key: a.key || a.Key, name: a.name || a.Name || a.accountName || a.AccountName || '' })).filter(a => a.key);
           console.log(`   Manager accounts from ${path}: ${accounts.length} items`);
-          return res.json({ success: true, accounts });
+          if (accounts.length) return res.json({ success: true, accounts });
         }
       }
-    } catch(e) {}
+    } catch(e) { console.log(`   accounts probe ${path} error: ${e.message}`); }
   }
+  console.log('   Manager accounts: none of the candidate paths returned a list');
   res.json({ success: true, accounts: [] });
+});
+
+// Diagnostic: fetch one existing text-custom-field's full form so we can learn
+// the exact shape (Placement etc.) required to create EFRIS fields programmatically.
+app.get('/api/manager/custom-field-sample', async (req, res) => {
+  const { ep, tk } = mgrCreds(req);
+  if (!ep || !tk) return res.status(400).json({ success: false, error: 'ep and tk required' });
+  try {
+    const list = await managerCall(ep, tk, 'GET', '/text-custom-fields', null);
+    const arr = (list.data && list.data.textCustomFields) || [];
+    // Fetch each field's full form so we see its Placement GUIDs (to map name→GUID).
+    const fields = [];
+    for (const f of arr) {
+      const k = f.key || f.Key;
+      try { const form = await managerCall(ep, tk, 'GET', `/text-custom-field-form/${k}`, null); fields.push({ key: k, name: f.name, form: form.data }); }
+      catch(_) { fields.push({ key: k, name: f.name, form: null }); }
+    }
+    // Try the "new form" endpoint — some Manager builds return the selectable
+    // placement options (name + GUID) here, which would let us map without probes.
+    let newForm = null;
+    try { const nf = await managerCall(ep, tk, 'GET', '/text-custom-field-form', null); newForm = nf.data; } catch(_) {}
+    res.json({ success: true, count: arr.length, fields, newForm });
+  } catch (e) { res.json({ success: false, error: e.message }); }
+});
+
+// ── EFRIS custom-field provisioning ───────────────────────────
+// Manager placement GUIDs identify built-in document types. These are the
+// values observed on a Manager file; they are overridable per request because
+// different company files MUST be verified (run /custom-field-sample probes).
+const MGR_PLACEMENTS = {
+  salesInvoice:   'ad12b60b-23bf-4421-94df-8be79cef533e',
+  receipt:        '7662b887-c8d8-486e-98fd-f9dbcd41c6dc',
+  inventoryItem:  '0dbdbf8a-d80c-48e6-b453-bb7862445b7c',
+  nonInventoryItem:'7affe9ee-731f-4936-8acf-15cae7bcacee',
+};
+// Each EFRIS field: the name to create, every name that counts as "already
+// present" (so we never duplicate), and which placement group it belongs to.
+function efrisFieldSpecs(P) {
+  const DOC  = [P.salesInvoice, P.receipt];
+  const ITEM = [P.inventoryItem, P.nonInventoryItem];
+  return [
+    { create: 'FDN',              match: ['fdn', 'fiscal document number'],            placement: DOC },
+    { create: 'Verification Code',match: ['verification code', 'antifake code'],       placement: DOC },
+    { create: 'QR Code',          match: ['qr code'],                                  placement: DOC },
+    { create: 'Device Number',    match: ['device number'],                            placement: DOC },
+    { create: 'Issued Time',      match: ['issued time'],                              placement: DOC },
+    { create: 'Invoice ID',       match: ['invoice id'],                               placement: DOC },
+    { create: 'Status',           match: ['status'],                                   placement: DOC },
+    { create: 'Submission Date',  match: ['submission date'],                          placement: DOC },
+    { create: 'Commodity Code',   match: ['commodity code'],                           placement: ITEM },
+    { create: 'Category Path',    match: ['category path', 'segment / class grouping'],placement: ITEM },
+  ];
+}
+
+// Report which EFRIS fields exist vs are missing (no writes).
+app.get('/api/manager/efris-fields-status', async (req, res) => {
+  const { ep, tk } = mgrCreds(req);
+  if (!ep || !tk) return res.status(400).json({ success: false, error: 'ep and tk required' });
+  try {
+    const list = await managerCall(ep, tk, 'GET', '/text-custom-fields', null);
+    const have = new Set(((list.data && list.data.textCustomFields) || []).map(f => (f.name || '').trim().toLowerCase()));
+    const specs = efrisFieldSpecs(MGR_PLACEMENTS);
+    const existing = [], missing = [];
+    for (const s of specs) (s.match.some(n => have.has(n)) ? existing : missing).push(s.create);
+    res.json({ success: true, existing, missing });
+  } catch (e) { res.json({ success: false, error: e.message }); }
+});
+
+// Create any missing EFRIS custom fields. Placement GUIDs may be overridden in
+// the body (placements:{salesInvoice,receipt,inventoryItem,nonInventoryItem}).
+app.post('/api/manager/ensure-efris-fields', async (req, res) => {
+  const { managerEndpoint, accessToken, placements } = req.body || {};
+  const ep = normEp(managerEndpoint || ''), tk = accessToken;
+  if (!ep || !tk) return res.status(400).json({ success: false, error: 'managerEndpoint and accessToken required' });
+  const P = Object.assign({}, MGR_PLACEMENTS, placements || {});
+  // Optional: name of an existing field to copy Type/Size/flags from. Manager's
+  // API doesn't document the field shape (OpenAPI says only "object"), so the
+  // reliable way to match a user's preferred Type/Size/printed-doc flags is to
+  // replicate an example field they configured by hand.
+  const templateName = ((req.body || {}).templateField || '').trim().toLowerCase();
+  try {
+    const list = await managerCall(ep, tk, 'GET', '/text-custom-fields', null);
+    const allFields = (list.data && list.data.textCustomFields) || [];
+    const have = new Set(allFields.map(f => (f.name || '').trim().toLowerCase()));
+    // Build a template of non-identity attributes (everything except Name/Key/
+    // Placement) from a chosen field, else the first existing field.
+    let template = {};
+    const tplField = allFields.find(f => (f.name || '').trim().toLowerCase() === templateName) || allFields[0];
+    if (tplField) {
+      const k = tplField.key || tplField.Key;
+      try {
+        const tf = await managerCall(ep, tk, 'GET', `/text-custom-field-form/${k}`, null);
+        const src = tf.data || {};
+        for (const key in src) {
+          if (['Name','Key','key','Placement','Placements','name'].includes(key)) continue;
+          template[key] = src[key];
+        }
+        console.log(`   ℹ ensure-fields: copying attributes from template "${tplField.name}": ${Object.keys(template).join(', ') || '(none)'}`);
+      } catch(_) {}
+    }
+    const specs = efrisFieldSpecs(P);
+    const created = [], skipped = [], failed = [];
+    for (const s of specs) {
+      if (s.match.some(n => have.has(n))) { skipped.push(s.create); continue; }
+      const full = Object.assign({}, template, { Name: s.create, Placement: s.placement });
+      try {
+        let r = await managerCall(ep, tk, 'POST', '/text-custom-field-form', full);
+        // If the richer payload is rejected, retry with the minimal shape so the
+        // field is still created (richness is best-effort, never a blocker).
+        if (!(r.status === 200 || r.status === 201) && Object.keys(template).length) {
+          console.log(`   ⚠ rich create for "${s.create}" failed (HTTP ${r.status}) — retrying minimal`);
+          r = await managerCall(ep, tk, 'POST', '/text-custom-field-form', { Name: s.create, Placement: s.placement });
+        }
+        if (r.status === 200 || r.status === 201) { created.push(s.create); console.log(`   ✓ created custom field: ${s.create}`); }
+        else { failed.push({ field: s.create, status: r.status, error: (r.data && (r.data.error || JSON.stringify(r.data))) || ('HTTP ' + r.status) }); }
+      } catch (e) { failed.push({ field: s.create, error: e.message }); }
+    }
+    res.json({ success: failed.length === 0, created, skipped, failed, templateUsed: tplField ? tplField.name : null });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
 app.get('/api/manager/divisions', async (req, res) => {
@@ -1028,17 +1174,27 @@ app.get('/api/manager/items-list', async (req, res) => {
   const { ep, tk } = mgrCreds(req);
   if (!ep || !tk) return res.status(400).json({ success: false, error: 'ep and tk required' });
   try {
+    // Explicitly request the columns we need (incl. SalePrice) — Manager list
+    // endpoints otherwise return only a default subset.
+    const cols = '?fields=ItemCode&fields=ItemName&fields=SalePrice&fields=UnitName';
     const [invR, niR] = await Promise.all([
-      managerCall(ep, tk, 'GET', '/inventory-items', null),
-      managerCall(ep, tk, 'GET', '/non-inventory-items', null)
+      managerCall(ep, tk, 'GET', '/inventory-items' + cols, null),
+      managerCall(ep, tk, 'GET', '/non-inventory-items' + cols, null)
     ]);
-    const mapItem = (i, type) => ({
-      key:   i.key  || i.Key  || '',
-      code:  i.code || i.Code || i.ItemCode || '',
-      name:  i.itemName || i.ItemName || i.name || i.Name || '',
-      price: parseFloat(i.salesPrice || i.SalesPrice || i.unitPrice || i.UnitPrice || i.defaultPrice || i.DefaultPrice || i.price || i.Price || 0) || 0,
-      type
-    });
+    const num = v => { if (v == null) return 0; if (typeof v === 'object') v = v.value != null ? v.value : (v.amount != null ? v.amount : 0); return parseFloat(v) || 0; };
+    const cur = v => (v && typeof v === 'object' && v.currency) ? String(v.currency) : '';
+    const mapItem = (i, type) => {
+      const sp = i.SalePrice || i.salePrice || i.salesPrice || i.SalesPrice || i.unitPrice || i.UnitPrice || i.price || i.Price;
+      return {
+        key:   i.key  || i.Key  || '',
+        code:  i.code || i.Code || i.ItemCode || '',
+        name:  i.itemName || i.ItemName || i.name || i.Name || '',
+        // The list returns the price as "SalePrice" (not Sales-); may be a {value,currency} object.
+        price: num(sp),
+        currency: cur(sp),
+        type
+      };
+    };
     const inv = (invR.data && (invR.data.inventoryItems  || invR.data.InventoryItems  || [])).map(i => mapItem(i, 'inventory'));
     const ni  = (niR.data  && (niR.data.nonInventoryItems || niR.data.NonInventoryItems || [])).map(i => mapItem(i, 'service'));
     console.log(`[items-list] inventory=${inv.length} non-inventory=${ni.length} first=${JSON.stringify((inv[0]||ni[0])||{})}`);
@@ -1052,19 +1208,22 @@ app.post('/api/manager/create-receipt', async (req, res) => {
   if (!managerEndpoint || !accessToken) return res.status(400).json({ success: false, error: 'Missing Manager credentials' });
   const ep = normEp(managerEndpoint);
   try {
-    // GET blank form template so we have the correct shape (including hidden fields)
-    const tmplR = await managerCall(ep, accessToken, 'GET', '/receipt-form', null);
-    if (tmplR.status !== 200) {
-      return res.status(502).json({ success: false, error: `Manager receipt-form GET failed: HTTP ${tmplR.status}` });
+    // Manager has NO "blank form" GET (GET /receipt-form/{key} needs a key), so we
+    // build the payload and POST it directly. A receipt requires a "Received in"
+    // bank/cash account — use the one supplied, else default to the first account.
+    let receivedIn = receipt.receivedIn || '';
+    if (!receivedIn) {
+      try {
+        const bankR = await managerCall(ep, accessToken, 'GET', '/bank-and-cash-accounts', null);
+        const arr = (bankR.data && (bankR.data.bankAndCashAccounts || bankR.data.BankAndCashAccounts)) || [];
+        if (arr.length) receivedIn = arr[0].key || arr[0].Key || '';
+      } catch(_) {}
     }
-    const form = Object.assign({}, tmplR.data || {});
-    // Remove identity fields so Manager creates a new record
-    delete form.Key; delete form.key; delete form.id; delete form.UniqueName; delete form.NameWithCode;
-    // Populate
+    const form = {};
     form.Date = receipt.date || new Date().toISOString().slice(0, 10);
     if (receipt.reference) form.Reference = receipt.reference;
-    if (receipt.customer)   form.Customer   = receipt.customer;
-    if (receipt.receivedIn) form.ReceivedIn  = receipt.receivedIn;
+    if (receipt.customer)   form.Contact    = receipt.customer;
+    if (receivedIn)         form.ReceivedIn  = receivedIn;
     if (receipt.description) form.Description = receipt.description;
     form.QuantityColumn = true;
     form.UnitPriceColumn = true;
@@ -1148,15 +1307,19 @@ app.get('/api/goods/manager-item-detail', async (req, res) => {
     const cf2 = d.customFields2 || d.CustomFields2 || {};
     const cfStrings = cf2.strings || cf2.Strings || {};
     console.log(`   Detail for ${key}:`, JSON.stringify(d).slice(0, 300));
+    // Field names differ between inventory items (ItemName, DefaultSalesUnitPrice,
+    // HasDefaultSalesUnitPrice, no Code) and non-inventory items (Name, SalesUnitPrice,
+    // HasSalesUnitPrice). Read every variant so both populate the form correctly.
+    const pick = (...keys) => { for (const k of keys) { if (d[k] !== undefined && d[k] !== null && d[k] !== '') return d[k]; } return undefined; };
     res.json({ success: true, item: {
       key,
-      code:                   d.code || d.Code || '',
-      name:                   d.name || d.Name || d.itemName || '',
-      unitName:               d.unitName || d.UnitName || '',
-      salesUnitPrice:         d.salesUnitPrice || d.SalesUnitPrice || 0,
-      hasSalesUnitPrice:      !!(d.hasSalesUnitPrice || d.HasSalesUnitPrice),
-      description:            d.description || d.Description || '',
-      defaultLineDescription: d.defaultLineDescription || d.DefaultLineDescription || '',
+      code:                   pick('ItemCode','itemCode','Code','code') || '',
+      name:                   pick('ItemName','itemName','Name','name') || '',
+      unitName:               pick('UnitName','unitName') || '',
+      salesUnitPrice:         pick('DefaultSalesUnitPrice','SalesUnitPrice','salesUnitPrice','DefaultSalesPrice') || 0,
+      hasSalesUnitPrice:      !!(d.HasDefaultSalesUnitPrice || d.hasDefaultSalesUnitPrice || d.HasSalesUnitPrice || d.hasSalesUnitPrice),
+      description:            pick('Description','description') || '',
+      defaultLineDescription: pick('DefaultLineDescription','defaultLineDescription') || '',
       customFieldStrings:     cfStrings,
       division:               d.division || d.Division || '',
       salesDivision:          d.salesDivision || d.SalesDivision || '',
@@ -1351,9 +1514,16 @@ app.post('/api/efris/submit-invoice', rateLimit(30), async (req, res) => {
     t109data.goodsDetails.forEach(g => console.log(`   T109 line: item="${g.item}" itemCode="${g.itemCode}" taxRule="${g.taxRule}"`));
     const session = await getSession(config.tin, config.deviceNo, config.efrisPassword, eu);
     if (!session.aesKey) throw new Error('No AES key available to encrypt T109');
-    const t109 = await efrisCall(eu, efrisEnvEnc('T109', t109data, config.tin, config.deviceNo, session.aesKey, session.privatePem));
-    const rc = t109.data && t109.data.returnStateInfo ? t109.data.returnStateInfo.returnCode : null;
-    const rm = t109.data && t109.data.returnStateInfo ? t109.data.returnStateInfo.returnMessage : '';
+    // rc 15 ("Data decryption error") is a transient URA-side fault — our ciphertext
+    // is verified-correct — so retry it (same as stock-in/adjust).
+    let t109, rc, rm;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      t109 = await efrisCall(eu, efrisEnvEnc('T109', t109data, config.tin, config.deviceNo, session.aesKey, session.privatePem));
+      rc = t109.data && t109.data.returnStateInfo ? t109.data.returnStateInfo.returnCode : null;
+      rm = t109.data && t109.data.returnStateInfo ? t109.data.returnStateInfo.returnMessage : '';
+      if (rc !== '15') break;
+      console.log(`   T109 rc 15 (transient decrypt error) — retry ${attempt}/3`);
+    }
     let contentStr = null;
     if (t109.data && t109.data.data && t109.data.data.content) {
       try { contentStr = aesDecryptStr(t109.data.data.content, session.aesKey); }
@@ -1396,6 +1566,7 @@ app.post('/api/efris/submit-invoice', rateLimit(30), async (req, res) => {
           validationUrl,
           deviceNo: config.deviceNo,
           invoiceId,
+          reference: invoice.Reference || invoice.reference || '',
           returnCode: rc,
           customerName: t109data.buyerDetails ? (t109data.buyerDetails.buyerLegalName || t109data.buyerDetails.buyerTin || '') : '',
           totalAmount: t109data.summary ? parseFloat(t109data.summary.grossAmount) || 0 : 0,
@@ -1571,35 +1742,72 @@ app.post('/api/efris/stock-in', rateLimit(30), async (req, res) => {
   try {
     const session = await getSession(config.tin, config.deviceNo, config.efrisPassword, eu);
     if (!session.aesKey) throw new Error('No AES key for T131');
+    // EFRIS T131 requires the header wrapped in `goodsStockIn` and items in
+    // `goodsStockInItem`. operationType lives ONLY in the header (101 = stock-in).
+    // A flat operationType at the root is why rc 2076 ("operationType cannot be
+    // empty") persisted — EFRIS reads goodsStockIn.operationType, not the root.
     const t131data = {
-      supplierName: supplierName || '', supplierTin: supplierTin || '',
-      remarks: remarks || '', branchId: branchId || '',
-      stockInDate: stockInDate || new Date().toISOString().slice(0,10).replace(/-/g,'/'),
-      stockInType: stockInType || '104',
-      productionBatchNo: productionBatchNo || '', productionDate: productionDate || '',
-      stockInItem: items.map(item => ({
-        goodsCode:       String(item.itemCode || ''),
-        quantity:        String(item.quantity || 1),
-        unitPrice:       String(item.unitPrice || 0),
-        measureUnit:     item.measureUnit || 'PP',
-        operationType:   '101',
-        remainInventory: String(item.quantity || 1),
+      goodsStockIn: {
+        operationType:     '101',
+        supplierTin:       supplierTin || '',
+        supplierName:      supplierName || '',
+        remarks:           remarks || '',
+        stockInDate:       (stockInDate || new Date().toISOString().slice(0,10)).slice(0,10),
+        stockInType:       stockInType || '104',
+        productionBatchNo: productionBatchNo || '',
+        productionDate:    productionDate || '',
+        branchId:          branchId || '',
+        invoiceNo:         '',
+        isCheckBatchNo:    '',
+        rollBackIfError:   '1',
+        goodsTypeCode:     '',
+      },
+      goodsStockInItem: items.map(item => ({
+        goodsCode:   String(item.goodsCode || item.itemCode || ''),
+        measureUnit: (item.measureUnit || 'PP').toUpperCase(),
+        quantity:    String(item.quantity || 1),
+        unitPrice:   String(item.unitPrice || 0),
+        remarks:     '',
       })),
     };
     console.log('\n📦 T131 stock-in payload:', JSON.stringify(t131data, null, 2));
-    const t131 = await efrisCall(eu, efrisEnvEnc('T131', t131data, config.tin, config.deviceNo, session.aesKey, session.privatePem));
-    const rc = t131.data && t131.data.returnStateInfo ? t131.data.returnStateInfo.returnCode : null;
-    const rm = t131.data && t131.data.returnStateInfo ? t131.data.returnStateInfo.returnMessage : '';
+    const envelope = efrisEnvEnc('T131', t131data, config.tin, config.deviceNo, session.aesKey, session.privatePem);
+    const selfCheck = aesDecryptStr(envelope.data.content, session.aesKey);
+    console.log(`   Self-decrypt check: ${selfCheck.slice(0, 200)}`);
+    // rc 15 = EFRIS "Data decryption error". Our ciphertext is verified correct
+    // (self-decrypt passes), so an rc 15 is a transient URA-side fault — retry it.
+    let t131, rc, rm;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const env = attempt === 1 ? envelope
+        : efrisEnvEnc('T131', t131data, config.tin, config.deviceNo, session.aesKey, session.privatePem);
+      t131 = await efrisCall(eu, env);
+      rc = t131.data && t131.data.returnStateInfo ? t131.data.returnStateInfo.returnCode : null;
+      rm = t131.data && t131.data.returnStateInfo ? t131.data.returnStateInfo.returnMessage : '';
+      if (rc !== '15') break;
+      console.log(`   T131 rc 15 (transient decrypt error) — retry ${attempt}/3`);
+    }
     let errors = [], rawContent = null;
     if (t131.data && t131.data.data && t131.data.data.content) {
-      try { const s = aesDecryptStr(t131.data.data.content, session.aesKey); rawContent = s; const d = JSON.parse(s); errors = d.errors || []; } catch(e) {}
+      try {
+        const s = aesDecryptStr(t131.data.data.content, session.aesKey); rawContent = s;
+        const d = JSON.parse(s);
+        // T131 returns an ARRAY of per-item results; collect any with a non-00 code.
+        if (Array.isArray(d)) errors = d.filter(r => r.returnCode && r.returnCode !== '00')
+          .map(r => ({ itemCode: r.goodsCode, returnCode: r.returnCode, returnMessage: r.returnMessage }));
+        else errors = d.errors || [];
+      } catch(e) { console.log(`   T131 decrypt error: ${e.message}`); }
     }
     console.log(`   T131 rc: ${rc} — ${rm}`);
-    if (rawContent) console.log(`   T131 raw response: ${rawContent.slice(0, 500)}`);
-    const ok = rc === '00' || rc === '45';
+    if (rawContent) {
+      try { const parsed = JSON.parse(rawContent); console.log(`   T131 raw response (parsed):`, JSON.stringify(parsed, null, 2).slice(0, 600)); } catch(e) { console.log(`   T131 raw response (raw): ${rawContent.slice(0, 500)}`); }
+    } else if (t131.data && t131.data.data) {
+      console.log(`   T131 response content (encrypted): ${JSON.stringify(t131.data.data).slice(0, 200)}`);
+    }
+    // rc 45 with item errors is NOT a success — surface the item-level reason.
+    const ok = rc === '00' || (rc === '45' && errors.length === 0);
     res.json(ok
       ? { success: rc === '00', partialErrors: errors, returnCode: rc, returnMessage: rm }
-      : { success: false, error: 'URA ' + rc + ': ' + rm, returnCode: rc, debug: rawContent });
+      : { success: false, error: errors.length ? errors.map(e => e.itemCode + ': ' + e.returnMessage).join('; ') : ('URA ' + rc + ': ' + rm), returnCode: rc, partialErrors: errors, debug: rawContent });
   } catch(e) {
     res.status(500).json({ success: false, error: e.message });
   }
@@ -1614,27 +1822,51 @@ app.post('/api/efris/stock-adjust', async (req, res) => {
     : 'https://efristest.ura.go.ug/efrisws/ws/taapp/getInformation';
   try {
     const session = await getSession(config.tin, config.deviceNo, config.efrisPassword, eu);
-    if (!session.aesKey) throw new Error('No AES key for T132');
+    if (!session.aesKey) throw new Error('No AES key for stock adjust');
+    // Stock adjustment is the SAME T131 interface with operationType 102 (decrease)
+    // plus an adjustType. Same goodsStockIn/goodsStockInItem wrapper as stock-in —
+    // the old flat payload to "T132" caused rc 2066 "Illegal json format".
     const t132data = {
-      remarks: remarks || '', branchId: branchId || '',
-      adjustDate: adjustDate || new Date().toISOString().slice(0, 10),
-      adjustType: adjustType || '102',
-      stockInItem: items.map(item => ({
-        itemCode: String(item.itemCode || ''), quantity: String(item.quantity || 1),
-        unitPrice: String(item.unitPrice || 0), measureUnit: item.measureUnit || '',
+      goodsStockIn: {
+        operationType:    '102',
+        supplierTin:      '',
+        supplierName:     '',
+        adjustType:       adjustType || '102',
+        remarks:          remarks || '',
+        stockInDate:      (adjustDate || new Date().toISOString().slice(0,10)).slice(0,10),
+        branchId:         branchId || '',
+        invoiceNo:        '',
+        rollBackIfError:  '1',
+        goodsTypeCode:    '',
+      },
+      goodsStockInItem: items.map(item => ({
+        goodsCode:   String(item.itemCode || item.goodsCode || ''),
+        measureUnit: (item.measureUnit || 'PP').toUpperCase(),
+        quantity:    String(item.quantity || 1),
+        unitPrice:   String(item.unitPrice || 0),
+        remarks:     '',
       })),
     };
-    const t132 = await efrisCall(eu, efrisEnvEnc('T132', t132data, config.tin, config.deviceNo, session.aesKey, session.privatePem));
-    const rc = t132.data && t132.data.returnStateInfo ? t132.data.returnStateInfo.returnCode : null;
-    const rm = t132.data && t132.data.returnStateInfo ? t132.data.returnStateInfo.returnMessage : '';
+    let t132, rc, rm;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      t132 = await efrisCall(eu, efrisEnvEnc('T131', t132data, config.tin, config.deviceNo, session.aesKey, session.privatePem));
+      rc = t132.data && t132.data.returnStateInfo ? t132.data.returnStateInfo.returnCode : null;
+      rm = t132.data && t132.data.returnStateInfo ? t132.data.returnStateInfo.returnMessage : '';
+      if (rc !== '15') break;
+    }
     let errors = [];
     if (t132.data && t132.data.data && t132.data.data.content) {
-      try { const s = aesDecryptStr(t132.data.data.content, session.aesKey); const d = JSON.parse(s); errors = d.errors || []; } catch(e) {}
+      try {
+        const s = aesDecryptStr(t132.data.data.content, session.aesKey); const d = JSON.parse(s);
+        if (Array.isArray(d)) errors = d.filter(r => r.returnCode && r.returnCode !== '00').map(r => ({ itemCode: r.goodsCode, returnCode: r.returnCode, returnMessage: r.returnMessage }));
+        else errors = d.errors || [];
+      } catch(e) {}
     }
-    const ok = rc === '00' || rc === '45';
+    console.log(`   T131(adjust) rc: ${rc} — ${rm}`);
+    const ok = rc === '00' || (rc === '45' && errors.length === 0);
     res.json(ok
       ? { success: rc === '00', partialErrors: errors, returnCode: rc, returnMessage: rm }
-      : { success: false, error: 'URA ' + rc + ': ' + rm, returnCode: rc });
+      : { success: false, error: errors.length ? errors.map(e => e.itemCode + ': ' + e.returnMessage).join('; ') : ('URA ' + rc + ': ' + rm), returnCode: rc, partialErrors: errors });
   } catch(e) {
     res.status(500).json({ success: false, error: e.message });
   }
@@ -1672,7 +1904,7 @@ app.post('/api/efris/save-to-manager', async (req, res) => {
     form.CustomFields2 = form.CustomFields2 || {};
     form.CustomFields2.Strings = form.CustomFields2.Strings || {};
     const setCFAny = (names, val) => { for (const n of names) { const k = cf.byName[n]; if (k && val != null && val !== '') { form.CustomFields2.Strings[k] = String(val); break; } } };
-    setCFAny(['Fiscal Document Number', 'EFRIS FDN'], efrisData.fdn);
+    setCFAny(['FDN', 'Fiscal Document Number', 'EFRIS FDN'], efrisData.fdn);
     setCFAny(['Verification Code', 'EFRIS Antifake Code'], efrisData.antifakeCode);
     // QR Code field: store the EFRIS validation URL — Manager's "QR Code" custom field type
     // encodes this as a scannable QR on printed documents, linking to URA's invoice validator
@@ -1811,13 +2043,17 @@ app.get('/api/manager/invoice', async (req, res) => {
 app.get('/api/manager/invoices', async (req, res) => {
   const { ep, tk } = mgrCreds(req);
   if (!ep || !tk) return res.status(400).json({ success: false, error: 'ep and tk are required' });
+  // Optional server-side search term (matches reference / customer in Manager) and
+  // a page size cap so large books don't pull everything.
+  const term = (req.query.term || '').trim();
+  const qs = (term ? ('?term=' + encodeURIComponent(term) + '&pageSize=100') : '?pageSize=100');
   try {
-    const r = await managerCall(ep, tk, 'GET', '/sales-invoices', null);
+    const r = await managerCall(ep, tk, 'GET', '/sales-invoices' + qs, null);
     if (r.status !== 200) return res.json({ success: false, error: 'Manager returned HTTP ' + r.status, hint: r.status === 401 ? 'Token rejected' : 'Check endpoint URL' });
     const list = ((r.data && r.data.salesInvoices) || []).map(i => ({ key: i.key, reference: i.reference, customer: i.customer, amount: (i.invoiceAmount && i.invoiceAmount.value) || 0, currency: (i.invoiceAmount && i.invoiceAmount.currency) || '', date: i.issueDate, status: i.status, docType: 'invoice' }));
     // Also include receipts (non-VAT cash sales). Tolerate absence / different shape.
     try {
-      const rr = await managerCall(ep, tk, 'GET', '/receipts', null);
+      const rr = await managerCall(ep, tk, 'GET', '/receipts' + qs, null);
       const rcpts = (rr.status === 200 && rr.data && (rr.data.receipts || rr.data.receiptsAndPayments)) || [];
       const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       const rcptItems = rcpts.map(i => ({ key: i.key, reference: i.reference || i.payee || '(receipt)', _ck: i.payer || i.customer || i.contact || '', amount: (i.amount && i.amount.value) || i.amount || 0, currency: (i.amount && i.amount.currency) || '', date: i.date || i.issueDate, status: i.status, docType: 'receipt' }));
@@ -1862,24 +2098,52 @@ app.post('/api/manager/test', async (req, res) => {
 // ══════════════════════════════════════════════════════════════
 //  FX RATE — Bank of Uganda mid-rate (cached 1h)
 // ══════════════════════════════════════════════════════════════
-let _fxCache = { ts: 0, rates: {} };
+let _fxCache = { ts: 0, rates: {}, source: '' };
+function _httpGet(url, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, { headers: { 'User-Agent': 'EFRISConnect/1.0' } }, r => {
+      // follow one redirect
+      if (r.statusCode >= 300 && r.statusCode < 400 && r.headers.location) {
+        r.resume(); return _httpGet(r.headers.location, timeoutMs).then(resolve, reject);
+      }
+      let d = ''; r.on('data', c => d += c); r.on('end', () => resolve(d));
+    });
+    req.on('error', reject);
+    req.setTimeout(timeoutMs || 8000, () => { req.destroy(new Error('FX source timed out')); });
+  });
+}
+// Primary: Bank of Uganda mid-rates (XML). Fallback: open.er-api.com (UGX base,
+// inverted to "UGX per 1 unit"). Returns whichever succeeds; merges so a currency
+// missing from BOU is still filled from the fallback.
 app.get('/api/fx-rates', async (req, res) => {
   try {
     if (Date.now() - _fxCache.ts < 3600000 && Object.keys(_fxCache.rates).length) {
-      return res.json({ success: true, rates: _fxCache.rates, cached: true });
+      return res.json({ success: true, rates: _fxCache.rates, cached: true, source: _fxCache.source });
     }
-    // Bank of Uganda XML rates feed
-    const xml = await new Promise((resolve, reject) => {
-      https.get('https://www.bou.or.ug/bou/bouwebsite/bouwebsitecontent/statistics/exchangerates/ExchangeRates.xml', r => {
-        let d = ''; r.on('data', c => d += c); r.on('end', () => resolve(d));
-      }).on('error', reject);
-    });
-    const rates = {};
-    const re = /<Currency code="([A-Z]{3})"[^>]*>[\s\S]*?<MidRate>([\d.]+)<\/MidRate>/g;
-    let m;
-    while ((m = re.exec(xml)) !== null) rates[m[1]] = parseFloat(m[2]);
-    _fxCache = { ts: Date.now(), rates };
-    res.json({ success: true, rates });
+    const rates = {}; const sources = [];
+    // 1) Bank of Uganda
+    try {
+      const xml = await _httpGet('https://www.bou.or.ug/bou/bouwebsite/bouwebsitecontent/statistics/exchangerates/ExchangeRates.xml');
+      const re = /<Currency code="([A-Z]{3})"[^>]*>[\s\S]*?<MidRate>([\d.]+)<\/MidRate>/g;
+      let m, n = 0;
+      while ((m = re.exec(xml)) !== null) { const v = parseFloat(m[2]); if (v > 0) { rates[m[1]] = v; n++; } }
+      if (n) sources.push('Bank of Uganda');
+    } catch (e) { console.log('FX: BOU source failed — ' + e.message); }
+    // 2) Fallback / fill gaps: open.er-api.com (free, no key). UGX base.
+    if (!Object.keys(rates).length) {
+      try {
+        const txt = await _httpGet('https://open.er-api.com/v6/latest/UGX');
+        const j = JSON.parse(txt);
+        if (j && j.rates) {
+          for (const code in j.rates) { const per = parseFloat(j.rates[code]); if (per > 0) rates[code] = Math.round((1 / per) * 10000) / 10000; }
+          sources.push('open.er-api.com');
+        }
+      } catch (e) { console.log('FX: er-api fallback failed — ' + e.message); }
+    }
+    if (!Object.keys(rates).length) return res.json({ success: false, error: 'No FX source reachable', rates: {} });
+    const source = sources.join(' + ');
+    _fxCache = { ts: Date.now(), rates, source };
+    res.json({ success: true, rates, source });
   } catch (e) {
     res.json({ success: false, error: e.message, rates: {} });
   }
@@ -1894,21 +2158,26 @@ app.post('/api/efris/search-goods', async (req, res) => {
   try {
     const eu = mode === 'production' ? 'https://efrisws.ura.go.ug/ws/taapp/getInformation' : 'https://efristest.ura.go.ug/efrisws/ws/taapp/getInformation';
     const session = await getSession(tin, deviceNo, efrisPassword, eu);
-    const payload = { goodsName: query || '', goodsCode: '', pageNo: '1', pageSize: '20' };
-    // TODO: verify correct T-code for goods search against EFRIS developer docs.
-    // T131 is stock-in — goods query may require a different interface code.
-    const GOODS_SEARCH_IFACE = 'T130';
+    // T127 = Goods/Services Inquiry (query goods registered under this TIN).
+    // NOTE: T130 is goods *registration* (upload) and only echoes the request back —
+    // it must NOT be used for search. T127 takes a single object (not a batch array).
+    const GOODS_SEARCH_IFACE = 'T127';
+    const payload = { goodsCode: '', goodsName: query || '', commodityCategoryCode: '', pageNo: '1', pageSize: '20' };
     const t131 = await efrisCall(eu, efrisEnvEnc(GOODS_SEARCH_IFACE, payload, tin, deviceNo, session.aesKey, session.privatePem));
     const outerRc = t131.data?.returnStateInfo?.returnCode;
-    if (outerRc !== '00') return res.json({ success: false, error: t131.data?.returnStateInfo?.returnMessage || `${GOODS_SEARCH_IFACE} failed` });
+    const outerRm = t131.data?.returnStateInfo?.returnMessage || '';
+    console.log(`\n🔍 ${GOODS_SEARCH_IFACE} search rc: ${outerRc} — ${outerRm}`);
+    if (outerRc !== '00' && outerRc !== '45') return res.json({ success: false, error: outerRm || `${GOODS_SEARCH_IFACE} failed` });
     let items = [];
     if (t131.data?.data?.content) {
       try {
         const raw = aesDecryptStr(t131.data.data.content, session.aesKey);
+        console.log(`   T127 search raw: ${raw.slice(0,300)}`);
         const parsed = JSON.parse(raw);
-        items = Array.isArray(parsed) ? parsed : (parsed.goodsList || parsed.list || []);
-      } catch(e) { /* no items */ }
+        items = parsed.records || parsed.goodsList || parsed.list || (Array.isArray(parsed) ? parsed : []);
+      } catch(e) { console.log(`   T127 search decrypt error: ${e.message}`); }
     }
+    console.log(`   T127 search found ${items.length} items`);
     res.json({ success: true, items });
   } catch (e) {
     const safe = e.message.replace(efrisPassword || '', '***');
@@ -1945,7 +2214,7 @@ app.get('/api/submission-log', (req, res) => {
     let log = [];
     try { log = JSON.parse(fs.readFileSync(SUBMISSION_LOG_FILE, 'utf8')); } catch(e) {}
     const page = parseInt(req.query.page) || 1;
-    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    const limit = Math.min(parseInt(req.query.limit) || 50, 1000);
     const q = (req.query.q || '').toLowerCase();
     const filtered = q ? log.filter(e =>
       (e.fdn || '').toLowerCase().includes(q) ||
