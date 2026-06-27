@@ -30,6 +30,7 @@
   .si{background:#e3f2fd;color:#0d47a1;border-color:#90caf9;}
   .ss{background:#e8f5e9;color:var(--gd);border-color:#a5d6a7;}
   .se{background:#ffebee;color:#b71c1c;border-color:#ef9a9a;}
+  .sw{background:#fff8e1;color:#5d4037;border-color:#ffe082;}
   .sw{background:#fff8e1;color:#e65100;border-color:#ffcc02;}
   @keyframes spin{to{transform:rotate(360deg)}}
   .sp{animation:spin 1s linear infinite;display:inline-block;}
@@ -598,6 +599,7 @@
               <span id="gEfrisUomDesc" style="font-size:11px;color:var(--gray);"></span>
               <button type="button" class="btn bo bsm" onclick="gOpenUnitPicker()">&#128203; Pick from valid EFRIS units</button>
             </div>
+            <div id="gUnitPickerBox" style="margin-top:6px;"></div>
           </div>
           <div class="fg"><label>&#9881; Item Profile Category</label>
             <select id="gFldType" onchange="gOnTypeChange()">
@@ -3052,9 +3054,9 @@ const _EFRIS_UOM_MAP = {
   'pair':'NPR','pairs':'NPR',
   'yard':'YRD','yards':'YRD',
   'metric ton':'TNE','tonne':'TNE','ton':'TNE','tonnes':'TNE',
-  'piece':'PCE','pieces':'PCE','pce':'PCE',
+  'piece':'PCE','pieces':'PCE','pce':'PCE','each':'PCE','ea':'PCE','item':'PCE','items':'PCE','number':'PCE','no':'PCE',
   'set':'SET',
-  'unit':'UN','each':'UN',
+  'unit':'PCE','units':'PCE',
   'kilometre':'KM','kilometer':'KM','km':'KM','kilometres':'KM',
   'kilowatt hour':'KWH','kwh':'KWH','kilo watt hour':'KWH','kwh -kilo watt hour':'KWH',
   'megawatt hour':'MWH','mwh':'MWH','mega watt hour':'MWH',
@@ -3087,24 +3089,35 @@ const _EFRIS_UOM_NAMES = {};
 async function gAutoEfrisUom(val){
   if(!val){return;}
   const key=val.trim().toLowerCase();
-  // 1. Exact map match
-  if(_EFRIS_UOM_MAP[key]){
-    const code=_EFRIS_UOM_MAP[key];
-    sv('gFldEfrisUom',code);
-    gShowEfrisUomDesc(code);
+  // Prefer the LIVE EFRIS dictionary so the code we set is guaranteed valid for
+  // this environment. Match by name (exact, then contains), else fall back to
+  // the static map, then validate whatever we land on against the live list.
+  const live=await gLoadValidUnits();
+  let code='';
+  if(live.length){
+    let m=live.find(u=>(u.name||'').toLowerCase()===key);
+    if(!m) m=live.find(u=>(u.name||'').toLowerCase().includes(key)||key.includes((u.name||'').toLowerCase()));
+    if(m) code=m.code;
+  }
+  if(!code && _EFRIS_UOM_MAP[key]) code=_EFRIS_UOM_MAP[key];
+  if(!code){
+    // try the static /api/units name list
+    try{ const units=await fetch(RELAY+'/api/units').then(r=>r.json()); const match=units.find(u=>(u.name||u.desc||'').toLowerCase()===key); if(match) code=match.code; }catch(_){}
+  }
+  if(!code && val.trim().length<=3) code=val.trim().toUpperCase();
+  const e=$('gEfrisUomDesc'), box=$('gUnitPickerBox');
+  if(!code){ if(e) e.textContent='⚠ Not recognised'; return; }
+  // Validate against the live list when we have it; auto-open the picker if invalid.
+  if(live.length && !live.some(u=>String(u.code).toUpperCase()===String(code).toUpperCase())){
+    if(e) e.textContent='';
+    if(box) box.innerHTML='<div class="st sw">&#9888; "'+esc(code)+'" isn\'t valid in EFRIS for this account. Pick the correct unit below.</div>';
+    sv('gFldEfrisUom','');
+    gOpenUnitPicker();
     return;
   }
-  // 2. Load units and try exact name match
-  try{
-    const units=await fetch(RELAY+'/api/units').then(r=>r.json());
-    const match=units.find(u=>u.name.toLowerCase()===key);
-    if(match){sv('gFldEfrisUom',match.code);gShowEfrisUomDesc(match.code,match.name);return;}
-    // 3. If already ≤3 chars, treat as a code
-    if(val.trim().length<=3){sv('gFldEfrisUom',val.trim().toUpperCase());gShowEfrisUomDesc(val.trim().toUpperCase());return;}
-    // 4. No match — clear and hint
-    const e=$('gEfrisUomDesc');
-    if(e)e.textContent='⚠ Not recognised — type the 1–3 char EFRIS code manually';
-  }catch(_){}
+  sv('gFldEfrisUom',code);
+  gShowEfrisUomDesc(code);
+  if(box) box.innerHTML='';
 }
 
 function gShowEfrisUomDesc(code,name){
@@ -3187,6 +3200,16 @@ async function gSyncToEfris(){
   const statusEl=$('gSyncStatus');
   if(!gCOM && !item.comCode){ alert('Pick a commodity category first (steps 1–4) so EFRIS knows the goods category.'); return; }
   if(!CFG.tin||!CFG.deviceNo){ statusEl.innerHTML='<div class="al aw">ℹ️ EFRIS skipped — add TIN and Device No. in Settings first.</div>'; return; }
+  // Guard: never send a unit code that isn't in the live EFRIS dictionary —
+  // open the picker instead of getting a rejection from EFRIS.
+  const live=await gLoadValidUnits();
+  const uomCode=(item.uom||'').toUpperCase().trim();
+  if(live.length && uomCode && !live.some(u=>String(u.code).toUpperCase()===uomCode)){
+    statusEl.innerHTML='';
+    const box=$('gUnitPickerBox')||statusEl;
+    gRenderUnitHelp(box, {validUnits:live, sentUnit:uomCode, picker:false});
+    return;
+  }
   statusEl.innerHTML='<div class="st si"><span class="sp">⏳</span> Registering in EFRIS goods registry…</div>';
   try{
     const r2=await fetch(RELAY+'/api/efris/register-goods',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tin:CFG.tin,deviceNo:CFG.deviceNo,efrisPassword:CFG.efrisPassword,mode:CFG.sandbox?'sandbox':'production',item})});
@@ -3199,7 +3222,7 @@ async function gSyncToEfris(){
         statusEl.innerHTML='<div class="st ss">✅ Registered in EFRIS goods registry!</div>';
       }
     }
-    else if(d2.unitProblem){ item.efrisSync='error'; gRenderUnitHelp(statusEl, d2); }
+    else if(d2.unitProblem){ item.efrisSync='error'; statusEl.innerHTML=''; const box=$('gUnitPickerBox')||statusEl; if(!_validUnits.length) await gLoadValidUnits(); gRenderUnitHelp(box, {validUnits:_validUnits, sentUnit:d2.sentUnit||gvi('gFldEfrisUom'), picker:false}); }
     else{ item.efrisSync='error'; statusEl.innerHTML='<div class="al aw">⚠ EFRIS: '+esc(d2.error||d2.returnMessage||'Failed')+'</div>'; }
   }catch(e2){ item.efrisSync='error'; statusEl.innerHTML='<div class="al aw">⚠ Could not reach EFRIS. Retry later.</div>'; }
   gUpsertItem(item);
@@ -3207,16 +3230,25 @@ async function gSyncToEfris(){
 
 // ── Valid EFRIS measure units (live from T115 dictionary) ──────
 let _validUnits=[];
-async function gOpenUnitPicker(){
-  const statusEl=$('gSyncStatus');
-  if(!CFG.tin||!CFG.deviceNo){ alert('Add your TIN and Device No. in Settings first to load EFRIS units.'); return; }
-  statusEl.innerHTML='<div class="st si"><span class="sp">⏳</span> Loading valid EFRIS units…</div>';
+// The authoritative EFRIS goods measure-unit list is the bundled uom.json
+// (served at /api/units) — the same list EFRIS validates T130 against (PCE,
+// KGM, PP, …). This is also offline-capable. NOTE: the live T115 "measureUnit"
+// section returns PACKAGING units (4H-Box, 43-Bag…), which EFRIS does NOT accept
+// as goods measure units — so we deliberately do not use it here.
+async function gLoadValidUnits(){
+  if(_validUnits.length) return _validUnits;
   try{
-    const r=await fetch(RELAY+'/api/efris/measure-units',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tin:CFG.tin,deviceNo:CFG.deviceNo,efrisPassword:CFG.efrisPassword,mode:CFG.sandbox?'sandbox':'production'})});
-    const d=await r.json();
-    if(!d.success||!d.units||!d.units.length){ statusEl.innerHTML='<div class="al aw">Could not load EFRIS units'+(d.error?': '+esc(d.error):'')+'. Check Settings / connection.</div>'; return; }
-    gRenderUnitHelp(statusEl, {validUnits:d.units, sentUnit:gvi('gFldEfrisUom'), picker:true});
-  }catch(e){ statusEl.innerHTML='<div class="al aw">Network error loading units: '+esc(e.message)+'</div>'; }
+    const arr=await fetch(RELAY+'/api/units').then(r=>r.json());
+    if(Array.isArray(arr)) _validUnits=arr.map(u=>({code:u.code,name:u.name||u.desc||''})).filter(u=>u.code);
+  }catch(_){}
+  return _validUnits;
+}
+async function gOpenUnitPicker(){
+  const box=$('gUnitPickerBox')||$('gSyncStatus');
+  box.innerHTML='<div class="st si"><span class="sp">⏳</span> Loading EFRIS units…</div>';
+  const units=await gLoadValidUnits();
+  if(!units.length){ box.innerHTML='<div class="al aw">Could not load the EFRIS unit list.</div>'; return; }
+  gRenderUnitHelp(box, {validUnits:units, sentUnit:gvi('gFldEfrisUom'), picker:true});
 }
 
 function gRenderUnitHelp(statusEl, d2){
@@ -3246,7 +3278,9 @@ function gFilterValidUnits(q){
 function gPickValidUnit(code){
   sv('gFldEfrisUom',code);
   gShowEfrisUomDesc(code);
-  const s=$('gSyncStatus'); if(s) s.innerHTML='<div class="al as">✅ EFRIS Unit Code set to <strong>'+esc(code)+'</strong>. Now click <strong>Register on EFRIS</strong>.</div>';
+  // Clear any stale rejection message both here and in the sync status area.
+  const box=$('gUnitPickerBox'); if(box) box.innerHTML='<div class="st ss">&#10003; EFRIS Unit Code set to <strong>'+esc(code)+'</strong>.</div>';
+  const s=$('gSyncStatus'); if(s) s.innerHTML='';
 }
 
 function gRefreshList(){
@@ -4296,10 +4330,30 @@ async function stkSubmitIn(){
       if(btn){btn.disabled=false;btn.textContent='&#128230; Submit Stock-in to EFRIS';} return;
     }
     const d=await r.json();
-    if(d.success) ht('stkInResult','<div class="st ss">&#10003; Stock recorded in EFRIS'+(d.partialErrors&&d.partialErrors.length?' ('+d.partialErrors.length+' item error(s))':'')+'</div>');
+    if(d.success){
+      ht('stkInResult','<div class="st ss">&#10003; Stock recorded in EFRIS'+(d.partialErrors&&d.partialErrors.length?' ('+d.partialErrors.length+' item error(s))':'')+'</div>');
+      mirrorStockToManager('in',items,gvi('stkDate'),'stkInResult');
+    }
     else ht('stkInResult','<div class="st se">&#10005; '+esc(d.error||'Failed')+(d.partialErrors&&d.partialErrors.length?'<br>'+d.partialErrors.map(e=>esc(e.itemCode+': '+e.returnMessage)).join('<br>'):'')+'</div>');
   }catch(e){ht('stkInResult','<div class="st se">'+esc(e.message)+'</div>');}
   if(btn){btn.disabled=false;btn.textContent='&#128230; Submit Stock-in to EFRIS';}
+}
+// After EFRIS records the movement, mirror the quantity into Manager's inventory
+// ledger (Write-on for in, Write-off for adjust). Best-effort: appends status.
+async function mirrorStockToManager(direction,items,date,resultId){
+  const ep=CFG.managerEndpoint||MGR_EP, tk=CFG.accessToken||MGR_TK;
+  if(!ep||!tk) return;
+  const payloadItems=items.map(i=>({itemCode:i.itemCode,quantity:i.quantity}));
+  const append=h=>{ const el=$(resultId); if(el) el.innerHTML+=h; };
+  append('<div class="st si" id="'+resultId+'_mgr"><span class="sp">⏳</span> Updating Manager inventory…</div>');
+  try{
+    const r=await fetch(RELAY+'/api/manager/inventory-adjust',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({managerEndpoint:ep,accessToken:tk,direction,date,items:payloadItems})});
+    const d=await r.json();
+    const mg=$(resultId+'_mgr');
+    if(d.success&&d.mirrored===d.total) mg.outerHTML='<div class="st ss">&#10003; Manager inventory updated ('+d.mirrored+' item'+(d.mirrored>1?'s':'')+')</div>';
+    else if(d.success) mg.outerHTML='<div class="st sw">&#9888; Manager: '+d.mirrored+'/'+d.total+' updated. '+esc((d.results||[]).filter(x=>!x.ok).map(x=>x.item+': '+x.error).join('; '))+'</div>';
+    else mg.outerHTML='<div class="st se">&#10005; Manager not updated: '+esc(d.error||(d.results||[]).map(x=>x.item+': '+x.error).join('; ')||'failed')+'</div>';
+  }catch(e){ const mg=$(resultId+'_mgr'); if(mg) mg.outerHTML='<div class="st se">&#10005; Manager update error: '+esc(e.message)+'</div>'; }
 }
 async function stkSubmitAdj(){
   const items=_stkAdjItems.filter(i=>i.itemCode.trim());
@@ -4314,7 +4368,10 @@ async function stkSubmitAdj(){
       config:{tin:CFG.tin,deviceNo:CFG.deviceNo,efrisPassword:CFG.efrisPassword,mode:CFG.sandbox?'sandbox':'production'}
     })});
     const d=await r.json();
-    if(d.success) ht('stkAdjResult','<div class="st ss">&#10003; Stock adjustment recorded in EFRIS</div>');
+    if(d.success){
+      ht('stkAdjResult','<div class="st ss">&#10003; Stock adjustment recorded in EFRIS</div>');
+      mirrorStockToManager('out',items,gvi('stkAdjDate'),'stkAdjResult');
+    }
     else ht('stkAdjResult','<div class="st se">&#10005; '+esc(d.error||'Failed')+'</div>');
   }catch(e){ht('stkAdjResult','<div class="st se">'+esc(e.message)+'</div>');}
   if(btn){btn.disabled=false;btn.textContent='&#128230; Submit Adjustment to EFRIS';}

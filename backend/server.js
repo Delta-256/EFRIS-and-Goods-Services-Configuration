@@ -1263,32 +1263,70 @@ app.post('/api/manager/create-receipt', async (req, res) => {
   }
 });
 
+// Resolve a Manager inventory-item key from its ItemCode (the code we keep in
+// sync with the EFRIS goodsCode). Returns null if not found.
+async function resolveManagerItemKey(ep, tk, code) {
+  if (!code) return null;
+  try {
+    const r = await managerCall(ep, tk, 'GET', '/inventory-items?fields=ItemCode&pageSize=1000', null);
+    const arr = (r.data && (r.data.inventoryItems || r.data.InventoryItems || [])) || [];
+    const want = String(code).trim().toLowerCase();
+    const hit = arr.find(i => String(i.ItemCode || i.code || i.Code || '').trim().toLowerCase() === want);
+    return hit ? (hit.key || hit.Key || null) : null;
+  } catch (_) { return null; }
+}
+
+// Mirror EFRIS stock movements into Manager's inventory ledger.
+//  direction 'in'  → Inventory Write-on  (increase qty)
+//  direction 'out' → Inventory Write-off (decrease qty)
+// Accepts items:[{itemCode, quantity}] (codes resolved to keys) or a single
+// {itemKey, qty}. Reports Manager's exact error per item so the payload shape
+// can be tuned if a build rejects it.
 app.post('/api/manager/inventory-adjust', async (req, res) => {
-  const { managerEndpoint, accessToken, itemKey, qty, date, description } = req.body || {};
-  if (!managerEndpoint || !accessToken || !itemKey) {
-    return res.status(400).json({ success: false, error: 'managerEndpoint, accessToken and itemKey are required' });
+  const b = req.body || {};
+  const { managerEndpoint, accessToken } = b;
+  if (!managerEndpoint || !accessToken) {
+    return res.status(400).json({ success: false, error: 'managerEndpoint and accessToken are required' });
   }
   const ep = normEp(managerEndpoint);
-  const payload = {
-    Date: date || new Date().toISOString().slice(0, 10),
-    Description: description || 'Initial stock entry',
-    Lines: [{ InventoryItem: itemKey, Qty: parseFloat(qty) || 0, UnitCost: 0 }]
-  };
-  // Manager's inventory adjustment document type varies — try paths in order
-  const adjPaths = ['/inventory-write-up-form', '/inventory-quantity-adjustment-form', '/inventory-adjustment-form', '/inventory-write-ups-form'];
-  try {
-    let lastErr = '';
-    for (const adjPath of adjPaths) {
-      const r = await managerCall(ep, accessToken, 'POST', adjPath, payload);
-      console.log(`   Inventory adjust ${adjPath}: HTTP ${r.status} for item ${itemKey} qty=${qty}`);
-      if (r.status >= 200 && r.status < 400) return res.json({ success: true, path: adjPath });
-      if (r.status !== 404) { lastErr = `HTTP ${r.status}: ${JSON.stringify(r.data||'').slice(0,200)}`; break; }
-      lastErr = `HTTP 404 on ${adjPath}`;
+  const direction = (b.direction === 'out') ? 'out' : 'in';
+  const date = b.date || new Date().toISOString().slice(0, 10);
+  const description = b.description || (direction === 'in' ? 'Stock-in via EFRISConnect' : 'Stock adjustment via EFRISConnect');
+  // Normalise to a list of {itemKey?, itemCode?, qty}
+  let items = Array.isArray(b.items) ? b.items.slice()
+            : (b.itemKey || b.itemCode) ? [{ itemKey: b.itemKey, itemCode: b.itemCode, qty: b.qty }] : [];
+  items = items.map(i => ({ itemKey: i.itemKey || '', itemCode: i.itemCode || i.code || '', qty: parseFloat(i.qty != null ? i.qty : i.quantity) || 0 }))
+               .filter(i => i.qty > 0 && (i.itemKey || i.itemCode));
+  if (!items.length) return res.json({ success: false, error: 'No items with a positive quantity to mirror.' });
+
+  const formPaths = direction === 'in'
+    ? ['/inventory-write-ups-form', '/inventory-write-up-form']
+    : ['/inventory-write-off-form', '/inventory-write-offs-form'];
+  // Manager line shape isn't documented (OpenAPI returns a bare object); try the
+  // most likely field name for the item, then a fallback.
+  const lineShapes = [k => ({ Item: k }), k => ({ InventoryItem: k })];
+
+  const results = [];
+  for (const it of items) {
+    let key = it.itemKey;
+    if (!key && it.itemCode) key = await resolveManagerItemKey(ep, accessToken, it.itemCode);
+    if (!key) { results.push({ item: it.itemCode || it.itemKey, ok: false, error: 'Item not found in Manager (by ItemCode)' }); continue; }
+    let done = false, lastErr = '';
+    for (const path of formPaths) {
+      for (const mkLine of lineShapes) {
+        const payload = { Date: date, Description: description, Lines: [Object.assign(mkLine(key), { Qty: it.qty })] };
+        const r = await managerCall(ep, accessToken, 'POST', path, payload);
+        console.log(`   inventory-adjust(${direction}) ${path}: HTTP ${r.status} item=${key} qty=${it.qty}`);
+        if (r.status >= 200 && r.status < 400) { results.push({ item: it.itemCode || key, ok: true, path }); done = true; break; }
+        lastErr = `HTTP ${r.status}: ${JSON.stringify(r.data || '').slice(0, 180)}`;
+        if (r.status !== 404 && r.status !== 400) break; // don't keep retrying on auth/other hard errors
+      }
+      if (done) break;
     }
-    res.json({ success: false, error: `Could not create inventory adjustment — ${lastErr}. Please set opening stock in Manager directly (Inventory → Write-ups).` });
-  } catch(e) {
-    res.status(500).json({ success: false, error: e.message });
+    if (!done) results.push({ item: it.itemCode || key, ok: false, error: lastErr || 'Manager rejected the adjustment' });
   }
+  const okCount = results.filter(r => r.ok).length;
+  res.json({ success: okCount > 0, mirrored: okCount, total: results.length, results });
 });
 
 // Full details for a single Manager.io item (for import prefill)
@@ -1361,30 +1399,32 @@ app.post('/api/efris/register-goods', async (req, res) => {
     const session = await getSession(tin, deviceNo, efrisPassword, eu);
     if (!session.aesKey) throw new Error('No AES key available — check private key path');
 
-    // Use pre-resolved efrisUom if provided (set in frontend from auto-detection)
-    // Otherwise fall back to name lookup against uom.json
-    let uomCode = 'UN';
-    // Only use efrisUom if it looks like a code (no spaces, ≤5 chars)
-    const rawEfrisUom = (item.efrisUom || '').trim();
-    const efrisUomIsCode = rawEfrisUom && !rawEfrisUom.includes(' ') && rawEfrisUom.length <= 5;
-    if (efrisUomIsCode) {
-      uomCode = rawEfrisUom.toUpperCase();
-      console.log(`   UOM: "${item.uom}" → EFRIS code "${uomCode}" (from item)`);
-    } else {
-      try {
-        const units = getUnits();
-        const match = units.find(u => u.name.toLowerCase() === (item.uom || '').toLowerCase());
-        if (match) {
-          uomCode = match.code;
-        } else if (item.uom && item.uom.length <= 3) {
-          uomCode = item.uom;
-          console.log(`   ℹ UOM "${item.uom}" treated as custom EFRIS code`);
-        } else {
-          uomCode = 'UN';
-          console.log(`   ⚠ UOM "${item.uom}" exceeds 3-byte EFRIS limit — using UN`);
-        }
-      } catch(_) {}
+    // Resolve the EFRIS measure-unit CODE. The frontend may pass a pre-resolved
+    // code (item.efrisUom) and/or a unit name (item.uom). We must only ever send
+    // a code that actually exists in uom.json — otherwise EFRIS rejects it (e.g.
+    // the literal word "PIECE" instead of the code "PCE").
+    const units = getUnits();
+    const byCode = new Map(units.map(u => [String(u.code).toUpperCase(), u.code]));
+    const byName = new Map(units.map(u => [String(u.name || u.desc || '').toLowerCase(), u.code]));
+    const rawEfrisUom = (item.efrisUom || '').trim().toUpperCase();
+    const rawName = (item.uom || '').trim().toLowerCase();
+    let uomCode = '';
+    if (rawEfrisUom && byCode.has(rawEfrisUom)) {
+      uomCode = byCode.get(rawEfrisUom);                         // valid code passed
+    } else if (byName.has(rawName)) {
+      uomCode = byName.get(rawName);                             // resolve "Piece" -> PCE
+    } else if (rawEfrisUom && byName.has(rawEfrisUom.toLowerCase())) {
+      uomCode = byName.get(rawEfrisUom.toLowerCase());           // efrisUom held a name
     }
+    if (!uomCode) {
+      // Unknown unit — report it as a unit problem rather than sending garbage.
+      const sent = rawEfrisUom || (item.uom || '');
+      console.log(`   ⚠ UOM "${sent}" is not a known EFRIS measure unit — asking user to pick.`);
+      return res.json({ success: false, unitProblem: true, sentUnit: sent,
+        validUnits: units.map(u => ({ code: u.code, name: u.name || u.desc || '' })),
+        error: `"${sent}" is not a valid EFRIS measure unit.` });
+    }
+    console.log(`   UOM resolved: uom="${item.uom}" efrisUom="${item.efrisUom}" → code "${uomCode}"`);
 
     // VAT tax item — taxCategoryCode: '01'=standard(18%), '02'=zero-rated, '03'=exempt
     const vatCat = item.vat === 'Exempt' ? '03' : item.vat === 'Zero' ? '02' : '01';
@@ -1460,7 +1500,9 @@ app.post('/api/efris/register-goods', async (req, res) => {
     let unitProblem = false, validUnits = [];
     if (!ok && (itemRc === '2235' || itemRc === '2234' || /measureunit/i.test(itemRm || ''))) {
       unitProblem = true;
-      try { validUnits = await getEfrisMeasureUnits(tin, deviceNo, session, eu); } catch(_) {}
+      // Offer the goods measure-unit list from uom.json (what EFRIS validates
+      // T130 against) — NOT the live T115 packaging-unit section.
+      try { validUnits = getUnits().map(u => ({ code: u.code, name: u.name || u.desc || '' })); } catch(_) {}
     }
     res.json({ success: ok, returnCode: itemRc, returnMessage: itemRm, alreadyExists,
       unitProblem, sentUnit: uomCode, validUnits,
