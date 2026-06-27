@@ -1335,13 +1335,11 @@ function resetAll(){
 }
 // Start onboarding for a NEW business without touching saved profiles.
 function addBusiness(){
-  try{
-    CFG={}; INV=null; DKEY=null; _lastInvKey=null; _invDebounce=null;
-    TG.vatReg=false; TG.sandbox=true; TG.efrisEnabled=true;
-    ['o1a','o1b','o1c','o1d','o1e','o2a','o2b','o2c','o2d','o4a','o4b'].forEach(i=>sv(i,''));
-    showScr('sOB'); obSh(1);
-    window.scrollTo(0,0);   // Settings card is far down the page; bring onboarding into view
-  }catch(e){ alert('Could not start onboarding: '+e.message); }
+  // Reload into a clean onboarding state — avoids any lingering-screen glitches
+  // and guarantees only the onboarding wizard is shown (not the old settings).
+  try{ sessionStorage.setItem('efris_onboard_new','1'); }catch(e){}
+  try{ localStorage.removeItem(SKEY); }catch(e){}  // clear the "active" mirror so init won't auto-load it
+  location.reload();
 }
 // Switch to a previously-saved business profile.
 function switchBusiness(id){
@@ -3535,6 +3533,14 @@ function init(){
     else if(ids.length>1) saved=store.profiles[store.active]||store.profiles[ids[0]]; // many → last used
   }
   window._profileCount=ids.length;
+  // "Add another business" sets this flag then reloads → force a clean onboarding.
+  let forceOnboard=false; try{ if(sessionStorage.getItem('efris_onboard_new')){ forceOnboard=true; sessionStorage.removeItem('efris_onboard_new'); } }catch(e){}
+  if(forceOnboard){
+    CFG={}; TG.vatReg=false; TG.sandbox=true; TG.efrisEnabled=true;
+    ['o1a','o1b','o1c','o1d','o1e','o2a','o2b','o2c','o2d','o4a','o4b'].forEach(i=>sv(i,''));
+    showScr('sOB'); obSh(1); window.scrollTo(0,0);
+    return;
+  }
   const onboarded = saved && saved.managerEndpoint && (saved.tin || saved.efrisEnabled===false);
   if(onboarded){
     CFG=saved;TG.vatReg=!!CFG.vatReg;TG.sandbox=CFG.sandbox!==false;TG.efrisEnabled=CFG.efrisEnabled!==false;apCFG();gApplyEfrisMode();
