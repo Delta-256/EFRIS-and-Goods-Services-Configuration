@@ -2166,21 +2166,44 @@ function _openReceiptWith(inv, efris){
   openReceiptUrl(RELAY+'/receipt?'+p.toString());
 }
 
-// Opening a new tab can silently fail when the extension is embedded inside
-// Manager's iframe (the sandbox may block pop-ups) — window.open then returns
-// null and the user sees "no response". Detect that and show a clickable link
-// they can tap directly (a fresh user gesture is allowed to open the tab).
+// Print like Manager's native print: render the receipt into a hidden,
+// same-origin iframe and call print() on it — no new tab, no navigating away,
+// works the same on the cloud edition and inside Manager Desktop. (The receipt
+// page hides its on-screen controls under @media print, so output is clean.)
 function openReceiptUrl(url){
-  let w=null;
-  try{ w=window.open(url,'_blank'); }catch(e){}
-  if(w){ try{ w.opener=null; }catch(_){} return; }
+  // Remove any previous print frame
+  const old=$('printFrame'); if(old){ try{ old.remove(); }catch(_){} }
+  const f=document.createElement('iframe');
+  f.id='printFrame';
+  f.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;';
+  let printed=false;
+  const fire=()=>{
+    if(printed) return; printed=true;
+    try{
+      const w=f.contentWindow;
+      w.focus();
+      try{ w.addEventListener('afterprint',()=>{ setTimeout(()=>{ try{ f.remove(); }catch(_){} },300); }); }catch(_){}
+      w.print();
+      // Fallback cleanup if afterprint never fires
+      setTimeout(()=>{ try{ if($('printFrame')) f.remove(); }catch(_){} }, 60000);
+    }catch(e){
+      // Cross-origin or sandbox blocked the iframe — fall back to a direct link.
+      try{ f.remove(); }catch(_){}
+      _printFallbackLink(url);
+    }
+  };
+  f.onload=()=>setTimeout(fire,150);
+  document.body.appendChild(f);
+  f.src=url;
+}
+function _printFallbackLink(url){
   let box=$('printFallback');
   if(!box){ box=document.createElement('div'); box.id='printFallback';
     box.style.cssText='position:fixed;left:0;right:0;bottom:0;z-index:2000;background:#fff3e0;border-top:1px solid #ffcc80;padding:10px 14px;font-size:12px;text-align:center;box-shadow:0 -2px 8px rgba(0,0,0,.12);';
     document.body.appendChild(box);
   }
-  box.innerHTML='Your browser blocked the print tab (common inside Manager). '
-    +'<a href="'+esc(url)+'" target="_blank" rel="noopener" style="font-weight:700;color:#1565c0;" onclick="var b=document.getElementById(\'printFallback\');if(b)b.remove();">Open / print the receipt &#8599;</a> '
+  box.innerHTML='Could not print in place. '
+    +'<a href="'+esc(url)+'" target="_blank" rel="noopener" style="font-weight:700;color:#1565c0;" onclick="var b=document.getElementById(\'printFallback\');if(b)b.remove();">Open the receipt &#8599;</a> '
     +'<button onclick="document.getElementById(\'printFallback\').remove()" style="margin-left:8px;background:none;border:none;color:var(--gray);cursor:pointer;">dismiss</button>';
 }
 
