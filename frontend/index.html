@@ -1111,6 +1111,7 @@
     <button class="btn bo" onclick="testMgr('sMgr','sTok','sMgrR')"><span class="ico-emoji">&#128279;</span><svg class="ico-svg" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg> Test Manager Connection</button>
     <div id="sMgrR"></div>
     <div class="al ai mt" style="font-size:11px;">EFRIS needs custom fields in Manager to store the FDN, QR code, verification code, commodity codes, etc. This checks which exist and creates any that are missing — on Sales Invoices, Receipts and Items.</div>
+    <div class="fg" style="margin:6px 0;"><label style="font-size:11px;">Copy formatting from field (optional)</label><input id="efrisFieldTpl" placeholder="e.g. an existing field name" style="font-size:12px;"/><span style="font-size:10px;color:var(--gray);">Manager doesn't expose field Type/Size/flags via its API. Configure ONE field in Manager exactly how you want (Type, Size, Show on printed documents, line placement, etc.), put its name here, and new fields will copy those settings.</span></div>
     <button class="btn bo" onclick="efrisFieldsCheck()">&#128203; Check / Create EFRIS Custom Fields</button>
     <div id="efrisFieldsR" class="mt"></div>
     <button class="btn br mt" onclick="resetAll()"><span class="ico-emoji">&#128465;</span><svg class="ico-svg" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg> Reset All Settings</button>
@@ -1465,9 +1466,11 @@ async function efrisFieldsCreate(){
   const ep=(gvi('sMgr')||CFG.managerEndpoint||MGR_EP), tk=(gvi('sTok')||CFG.accessToken||MGR_TK);
   ht('efrisFieldsR','<div class="st si"><span class="sp">⏳</span> Creating custom fields…</div>');
   try{
-    const r=await fetch(RELAY+'/api/manager/ensure-efris-fields',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({managerEndpoint:ep,accessToken:tk})});
+    const tpl=(gvi('efrisFieldTpl')||'').trim();
+    const r=await fetch(RELAY+'/api/manager/ensure-efris-fields',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({managerEndpoint:ep,accessToken:tk,templateField:tpl})});
     const d=await r.json();
     let h='';
+    if(d.templateUsed) h+='<div class="al ai" style="font-size:11px;">Copied Type/Size/flags from existing field: <strong>'+esc(d.templateUsed)+'</strong></div>';
     if(d.created&&d.created.length) h+='<div class="st ss">&#10003; Created: '+d.created.map(esc).join(', ')+'</div>';
     if(d.skipped&&d.skipped.length) h+='<div class="al ai" style="font-size:11px;">Already existed: '+d.skipped.map(esc).join(', ')+'</div>';
     if(d.failed&&d.failed.length) h+='<div class="st se">Failed: '+d.failed.map(f=>esc(f.field+' ('+(f.error||f.status)+')')).join('; ')+'</div>';

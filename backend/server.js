@@ -1107,20 +1107,49 @@ app.post('/api/manager/ensure-efris-fields', async (req, res) => {
   const ep = normEp(managerEndpoint || ''), tk = accessToken;
   if (!ep || !tk) return res.status(400).json({ success: false, error: 'managerEndpoint and accessToken required' });
   const P = Object.assign({}, MGR_PLACEMENTS, placements || {});
+  // Optional: name of an existing field to copy Type/Size/flags from. Manager's
+  // API doesn't document the field shape (OpenAPI says only "object"), so the
+  // reliable way to match a user's preferred Type/Size/printed-doc flags is to
+  // replicate an example field they configured by hand.
+  const templateName = ((req.body || {}).templateField || '').trim().toLowerCase();
   try {
     const list = await managerCall(ep, tk, 'GET', '/text-custom-fields', null);
-    const have = new Set(((list.data && list.data.textCustomFields) || []).map(f => (f.name || '').trim().toLowerCase()));
+    const allFields = (list.data && list.data.textCustomFields) || [];
+    const have = new Set(allFields.map(f => (f.name || '').trim().toLowerCase()));
+    // Build a template of non-identity attributes (everything except Name/Key/
+    // Placement) from a chosen field, else the first existing field.
+    let template = {};
+    const tplField = allFields.find(f => (f.name || '').trim().toLowerCase() === templateName) || allFields[0];
+    if (tplField) {
+      const k = tplField.key || tplField.Key;
+      try {
+        const tf = await managerCall(ep, tk, 'GET', `/text-custom-field-form/${k}`, null);
+        const src = tf.data || {};
+        for (const key in src) {
+          if (['Name','Key','key','Placement','Placements','name'].includes(key)) continue;
+          template[key] = src[key];
+        }
+        console.log(`   ℹ ensure-fields: copying attributes from template "${tplField.name}": ${Object.keys(template).join(', ') || '(none)'}`);
+      } catch(_) {}
+    }
     const specs = efrisFieldSpecs(P);
     const created = [], skipped = [], failed = [];
     for (const s of specs) {
       if (s.match.some(n => have.has(n))) { skipped.push(s.create); continue; }
+      const full = Object.assign({}, template, { Name: s.create, Placement: s.placement });
       try {
-        const r = await managerCall(ep, tk, 'POST', '/text-custom-field-form', { Name: s.create, Placement: s.placement });
+        let r = await managerCall(ep, tk, 'POST', '/text-custom-field-form', full);
+        // If the richer payload is rejected, retry with the minimal shape so the
+        // field is still created (richness is best-effort, never a blocker).
+        if (!(r.status === 200 || r.status === 201) && Object.keys(template).length) {
+          console.log(`   ⚠ rich create for "${s.create}" failed (HTTP ${r.status}) — retrying minimal`);
+          r = await managerCall(ep, tk, 'POST', '/text-custom-field-form', { Name: s.create, Placement: s.placement });
+        }
         if (r.status === 200 || r.status === 201) { created.push(s.create); console.log(`   ✓ created custom field: ${s.create}`); }
         else { failed.push({ field: s.create, status: r.status, error: (r.data && (r.data.error || JSON.stringify(r.data))) || ('HTTP ' + r.status) }); }
       } catch (e) { failed.push({ field: s.create, error: e.message }); }
     }
-    res.json({ success: failed.length === 0, created, skipped, failed });
+    res.json({ success: failed.length === 0, created, skipped, failed, templateUsed: tplField ? tplField.name : null });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
