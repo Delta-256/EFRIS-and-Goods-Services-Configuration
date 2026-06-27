@@ -3271,7 +3271,8 @@ async function t131Search(){
     if(!d.success){el.innerHTML='<div class="al aw">'+esc(d.error||'Search failed')+'</div>';return;}
     if(!d.items||!d.items.length){el.innerHTML='<div class="al ai">No results found for "'+esc(q)+'".</div>';return;}
     window.__gsResults=d.items;  // store so the Stock-in button can reference by index (avoids JSON-in-attribute quote bug)
-    el.innerHTML='<table style="width:100%;font-size:11px;border-collapse:collapse;">'
+    el.innerHTML='<div style="display:flex;justify-content:flex-end;margin-bottom:6px;"><button class="btn bo bsm" style="font-size:11px;" onclick="gsSyncAllToManager()">&#128229; Sync all '+d.items.length+' to Manager</button></div>'
+      +'<table style="width:100%;font-size:11px;border-collapse:collapse;">'
       +'<thead><tr><th style="text-align:left;padding:4px;border-bottom:1px solid var(--bdr);">Code</th><th style="text-align:left;padding:4px;border-bottom:1px solid var(--bdr);">Name</th><th style="text-align:left;padding:4px;border-bottom:1px solid var(--bdr);">Type</th><th style="text-align:left;padding:4px;border-bottom:1px solid var(--bdr);">Unit</th><th style="text-align:left;padding:4px;border-bottom:1px solid var(--bdr);">Price</th><th style="padding:4px;border-bottom:1px solid var(--bdr);"></th></tr></thead>'
       +'<tbody>'+d.items.map((it,idx)=>'<tr style="border-bottom:1px solid #f5f5f5;">'
         +'<td style="padding:4px;font-family:monospace;">'+esc(it.goodsCode||'')+'</td>'
@@ -3279,9 +3280,56 @@ async function t131Search(){
         +'<td style="padding:4px;">'+esc(it.goodsTypeCode==='101'?'Goods':'Service')+'</td>'
         +'<td style="padding:4px;">'+esc(it.measureUnit||'')+'</td>'
         +'<td style="padding:4px;">'+esc(it.unitPrice||'')+'</td>'
-        +'<td style="padding:4px;"><button class="btn bsm" style="font-size:10px;padding:2px 6px;" onclick="stkPreFill('+idx+')">→ Stock-in</button></td>'
-        +'</tr>').join('')+'</tbody></table>';
+        +'<td style="padding:4px;white-space:nowrap;">'
+          +'<button class="btn bsm" style="font-size:10px;padding:2px 6px;" onclick="stkPreFill('+idx+')">&rarr; Stock-in</button> '
+          +'<button class="btn bo bsm" style="font-size:10px;padding:2px 6px;" onclick="gsSyncToManager('+idx+',this)">&rarr; Manager</button>'
+        +'</td>'
+        +'</tr>').join('')+'</tbody></table><div id="gsSyncResult" style="margin-top:6px;"></div>';
   }catch(e){el.innerHTML='<div class="al aw">Network error: '+esc(e.message)+'</div>';}
+}
+
+// Map an EFRIS T127 goods record to the item shape /api/goods/sync-to-manager expects.
+function efrisRecToItem(it){
+  return {
+    code: it.goodsCode||'', name: it.goodsName||it.name||'',
+    type: (it.goodsTypeCode==='101'||it.goodsTypeCode===101)?'Goods':'Service',
+    uom: it.measureUnit||'', price: parseFloat(it.unitPrice)||0,
+    comCode: it.commodityCategoryCode||'', cls: it.commodityCategoryName||'',
+    cur: it.currency||'', remarks: ''
+    // vat intentionally omitted — EFRIS T127 doesn't return a clean VAT designation,
+    // and forcing a tax code could be wrong. Set tax manually in Manager if needed.
+  };
+}
+async function gsSyncOne(it){
+  const ep=CFG.managerEndpoint||MGR_EP, tk=CFG.accessToken||MGR_TK;
+  const r=await fetch(RELAY+'/api/goods/sync-to-manager',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({managerEndpoint:ep,accessToken:tk,item:efrisRecToItem(it)})});
+  return r.json();
+}
+async function gsSyncToManager(idx,btn){
+  const it=(window.__gsResults||[])[idx]; if(!it) return;
+  const ep=CFG.managerEndpoint||MGR_EP, tk=CFG.accessToken||MGR_TK;
+  if(!ep||!tk){ ht('gsSyncResult','<div class="st se">Connect Manager first (Settings).</div>'); return; }
+  if(btn){btn.disabled=true;btn.textContent='…';}
+  try{
+    const d=await gsSyncOne(it);
+    ht('gsSyncResult', d.success!==false
+      ? '<div class="st ss">&#10003; '+esc(it.goodsName||it.goodsCode)+' '+esc(d.action||'synced')+' in Manager.</div>'
+      : '<div class="st se">&#10005; '+esc(it.goodsName||it.goodsCode)+': '+esc(d.error||'failed')+'</div>');
+  }catch(e){ ht('gsSyncResult','<div class="st se">Network error: '+esc(e.message)+'</div>'); }
+  if(btn){btn.disabled=false;btn.innerHTML='&rarr; Manager';}
+}
+async function gsSyncAllToManager(){
+  const items=window.__gsResults||[]; if(!items.length) return;
+  const ep=CFG.managerEndpoint||MGR_EP, tk=CFG.accessToken||MGR_TK;
+  if(!ep||!tk){ ht('gsSyncResult','<div class="st se">Connect Manager first (Settings).</div>'); return; }
+  let ok=0, fail=0; const errs=[];
+  for(let i=0;i<items.length;i++){
+    ht('gsSyncResult','<div class="st si"><span class="sp">⏳</span> Syncing '+(i+1)+' / '+items.length+'…</div>');
+    try{ const d=await gsSyncOne(items[i]); if(d.success!==false) ok++; else { fail++; errs.push((items[i].goodsCode||items[i].goodsName)+': '+(d.error||'failed')); } }
+    catch(e){ fail++; errs.push((items[i].goodsCode||items[i].goodsName)+': '+e.message); }
+  }
+  ht('gsSyncResult','<div class="st '+(fail?'se':'ss')+'">&#10003; Synced '+ok+' to Manager'+(fail?(', '+fail+' failed'):'')+'.'+(errs.length?'<br><span style="font-size:11px;">'+errs.map(esc).join('<br>')+'</span>':'')+'</div>');
+  gLoadItems&&gLoadItems();
 }
 
 function stkPreFill(idx){
