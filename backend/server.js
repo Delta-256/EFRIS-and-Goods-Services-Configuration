@@ -1153,14 +1153,19 @@ app.get('/api/manager/items-list', async (req, res) => {
       managerCall(ep, tk, 'GET', '/non-inventory-items' + cols, null)
     ]);
     const num = v => { if (v == null) return 0; if (typeof v === 'object') v = v.value != null ? v.value : (v.amount != null ? v.amount : 0); return parseFloat(v) || 0; };
-    const mapItem = (i, type) => ({
-      key:   i.key  || i.Key  || '',
-      code:  i.code || i.Code || i.ItemCode || '',
-      name:  i.itemName || i.ItemName || i.name || i.Name || '',
-      // The list returns the price as "SalePrice" (not Sales-); may be a {value} object.
-      price: num(i.SalePrice || i.salePrice || i.salesPrice || i.SalesPrice || i.unitPrice || i.UnitPrice || i.price || i.Price),
-      type
-    });
+    const cur = v => (v && typeof v === 'object' && v.currency) ? String(v.currency) : '';
+    const mapItem = (i, type) => {
+      const sp = i.SalePrice || i.salePrice || i.salesPrice || i.SalesPrice || i.unitPrice || i.UnitPrice || i.price || i.Price;
+      return {
+        key:   i.key  || i.Key  || '',
+        code:  i.code || i.Code || i.ItemCode || '',
+        name:  i.itemName || i.ItemName || i.name || i.Name || '',
+        // The list returns the price as "SalePrice" (not Sales-); may be a {value,currency} object.
+        price: num(sp),
+        currency: cur(sp),
+        type
+      };
+    };
     const inv = (invR.data && (invR.data.inventoryItems  || invR.data.InventoryItems  || [])).map(i => mapItem(i, 'inventory'));
     const ni  = (niR.data  && (niR.data.nonInventoryItems || niR.data.NonInventoryItems || [])).map(i => mapItem(i, 'service'));
     console.log(`[items-list] inventory=${inv.length} non-inventory=${ni.length} first=${JSON.stringify((inv[0]||ni[0])||{})}`);

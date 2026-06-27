@@ -3777,14 +3777,44 @@ function crItemSearch(lineIdx, v){
   renderCrTotal();
 }
 
-function crSelectItem(lineIdx,itemIdx){
+// Cache of "UGX per 1 unit" rates (UGX itself = 1).
+let _fxRates={UGX:1};
+async function fxToUGX(cur){
+  cur=(cur||'UGX').toUpperCase(); if(cur==='UGX') return 1;
+  if(_fxRates[cur]) return _fxRates[cur];
+  try{ const r=await fetch(RELAY+'/api/fx-rates'); const d=await r.json(); if(d.success&&d.rates){ Object.assign(_fxRates,d.rates); } }catch(e){}
+  return _fxRates[cur]||null;
+}
+async function crSelectItem(lineIdx,itemIdx){
   const it=_crItems[itemIdx]; if(!it) return;
   _crLines[lineIdx].itemKey=it.key;
   _crLines[lineIdx].description=it.name;
-  if(it.price){ _crLines[lineIdx].unitPrice=it.price; }
+  let note='';
+  if(it.price){
+    let price=it.price;
+    // The receipt has a single currency. If the item's native price is in a
+    // different currency, convert it so every line is in the receipt currency.
+    const recCur=(($('crCurrency')||{}).value||'UGX').toUpperCase();
+    const itemCur=(it.currency||recCur).toUpperCase();
+    if(itemCur!==recCur){
+      const a=await fxToUGX(itemCur), b=await fxToUGX(recCur);
+      if(a&&b){ price=Math.round((it.price*a/b)*100)/100;
+        note='Converted '+it.price.toLocaleString()+' '+itemCur+' → '+price.toLocaleString()+' '+recCur;
+      } else {
+        note='⚠ '+it.price.toLocaleString()+' is in '+itemCur+' but no rate found — enter the '+recCur+' price manually.';
+      }
+    }
+    _crLines[lineIdx].unitPrice=price;
+  }
   renderCrLines();
+  if(note) flashCrNote(note);
   // Restore focus to next logical field (qty)
   setTimeout(()=>{ const inputs=document.querySelectorAll('#crLinesList input[type="number"]'); if(inputs[lineIdx*2]) inputs[lineIdx*2].focus(); },50);
+}
+function flashCrNote(msg){
+  const list=$('crLinesList'); if(!list)return;
+  let n=$('crConvNote'); if(!n){ n=document.createElement('div'); n.id='crConvNote'; n.style.cssText='font-size:11px;color:#1565c0;margin-top:4px;'; list.parentNode.insertBefore(n,list.nextSibling); }
+  n.textContent=msg;
 }
 
 function crHideSug(i){ const s=$('crSug'+i); if(s)s.style.display='none'; }
