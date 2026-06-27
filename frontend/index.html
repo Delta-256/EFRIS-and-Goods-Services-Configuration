@@ -3200,6 +3200,16 @@ async function gSyncToEfris(){
   const statusEl=$('gSyncStatus');
   if(!gCOM && !item.comCode){ alert('Pick a commodity category first (steps 1–4) so EFRIS knows the goods category.'); return; }
   if(!CFG.tin||!CFG.deviceNo){ statusEl.innerHTML='<div class="al aw">ℹ️ EFRIS skipped — add TIN and Device No. in Settings first.</div>'; return; }
+  // Guard: never send a unit code that isn't in the live EFRIS dictionary —
+  // open the picker instead of getting a rejection from EFRIS.
+  const live=await gLoadValidUnits();
+  const uomCode=(item.uom||'').toUpperCase().trim();
+  if(live.length && uomCode && !live.some(u=>String(u.code).toUpperCase()===uomCode)){
+    statusEl.innerHTML='';
+    const box=$('gUnitPickerBox')||statusEl;
+    gRenderUnitHelp(box, {validUnits:live, sentUnit:uomCode, picker:false});
+    return;
+  }
   statusEl.innerHTML='<div class="st si"><span class="sp">⏳</span> Registering in EFRIS goods registry…</div>';
   try{
     const r2=await fetch(RELAY+'/api/efris/register-goods',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tin:CFG.tin,deviceNo:CFG.deviceNo,efrisPassword:CFG.efrisPassword,mode:CFG.sandbox?'sandbox':'production',item})});
@@ -3212,7 +3222,7 @@ async function gSyncToEfris(){
         statusEl.innerHTML='<div class="st ss">✅ Registered in EFRIS goods registry!</div>';
       }
     }
-    else if(d2.unitProblem){ item.efrisSync='error'; gRenderUnitHelp(statusEl, d2); }
+    else if(d2.unitProblem){ item.efrisSync='error'; statusEl.innerHTML=''; const box=$('gUnitPickerBox')||statusEl; if(!_validUnits.length) await gLoadValidUnits(); gRenderUnitHelp(box, {validUnits:_validUnits, sentUnit:d2.sentUnit||gvi('gFldEfrisUom'), picker:false}); }
     else{ item.efrisSync='error'; statusEl.innerHTML='<div class="al aw">⚠ EFRIS: '+esc(d2.error||d2.returnMessage||'Failed')+'</div>'; }
   }catch(e2){ item.efrisSync='error'; statusEl.innerHTML='<div class="al aw">⚠ Could not reach EFRIS. Retry later.</div>'; }
   gUpsertItem(item);
