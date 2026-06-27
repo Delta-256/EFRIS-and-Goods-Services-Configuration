@@ -1269,18 +1269,20 @@ app.post('/api/manager/create-receipt', async (req, res) => {
 async function resolveManagerItemKey(ep, tk, code) {
   if (!code) return { key: null, reason: 'no code' };
   const want = String(code).trim().toLowerCase();
+  const codeOf = i => String(i.code || i.Code || i.ItemCode || i.itemCode || '').trim().toLowerCase();
   try {
-    const r = await managerCall(ep, tk, 'GET', '/inventory-items?fields=ItemCode&fields=ItemName&pageSize=1000', null);
+    // Fetch WITHOUT a ?fields filter — that filter omits the code field Manager
+    // actually returns (the list exposes it as "code"/"Code", not "ItemCode").
+    const r = await managerCall(ep, tk, 'GET', '/inventory-items', null);
     const arr = (r.data && (r.data.inventoryItems || r.data.InventoryItems || [])) || [];
-    const hit = arr.find(i => String(i.ItemCode || i.code || i.Code || '').trim().toLowerCase() === want);
+    const hit = arr.find(i => codeOf(i) === want);
     if (hit) return { key: hit.key || hit.Key || null };
     // Not an inventory item — is it a non-inventory (service) item? Those can't
     // hold stock in Manager, so tell the user precisely.
     try {
-      const nr = await managerCall(ep, tk, 'GET', '/non-inventory-items?fields=ItemCode&pageSize=1000', null);
+      const nr = await managerCall(ep, tk, 'GET', '/non-inventory-items', null);
       const narr = (nr.data && (nr.data.nonInventoryItems || nr.data.NonInventoryItems || [])) || [];
-      const nhit = narr.find(i => String(i.ItemCode || i.code || i.Code || '').trim().toLowerCase() === want);
-      if (nhit) return { key: null, reason: 'non-inventory' };
+      if (narr.find(i => codeOf(i) === want)) return { key: null, reason: 'non-inventory' };
     } catch (_) {}
     return { key: null, reason: 'not found' };
   } catch (_) { return { key: null, reason: 'lookup failed' }; }
