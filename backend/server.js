@@ -1399,30 +1399,32 @@ app.post('/api/efris/register-goods', async (req, res) => {
     const session = await getSession(tin, deviceNo, efrisPassword, eu);
     if (!session.aesKey) throw new Error('No AES key available — check private key path');
 
-    // Use pre-resolved efrisUom if provided (set in frontend from auto-detection)
-    // Otherwise fall back to name lookup against uom.json
-    let uomCode = 'UN';
-    // Only use efrisUom if it looks like a code (no spaces, ≤5 chars)
-    const rawEfrisUom = (item.efrisUom || '').trim();
-    const efrisUomIsCode = rawEfrisUom && !rawEfrisUom.includes(' ') && rawEfrisUom.length <= 5;
-    if (efrisUomIsCode) {
-      uomCode = rawEfrisUom.toUpperCase();
-      console.log(`   UOM: "${item.uom}" → EFRIS code "${uomCode}" (from item)`);
-    } else {
-      try {
-        const units = getUnits();
-        const match = units.find(u => u.name.toLowerCase() === (item.uom || '').toLowerCase());
-        if (match) {
-          uomCode = match.code;
-        } else if (item.uom && item.uom.length <= 3) {
-          uomCode = item.uom;
-          console.log(`   ℹ UOM "${item.uom}" treated as custom EFRIS code`);
-        } else {
-          uomCode = 'UN';
-          console.log(`   ⚠ UOM "${item.uom}" exceeds 3-byte EFRIS limit — using UN`);
-        }
-      } catch(_) {}
+    // Resolve the EFRIS measure-unit CODE. The frontend may pass a pre-resolved
+    // code (item.efrisUom) and/or a unit name (item.uom). We must only ever send
+    // a code that actually exists in uom.json — otherwise EFRIS rejects it (e.g.
+    // the literal word "PIECE" instead of the code "PCE").
+    const units = getUnits();
+    const byCode = new Map(units.map(u => [String(u.code).toUpperCase(), u.code]));
+    const byName = new Map(units.map(u => [String(u.name || u.desc || '').toLowerCase(), u.code]));
+    const rawEfrisUom = (item.efrisUom || '').trim().toUpperCase();
+    const rawName = (item.uom || '').trim().toLowerCase();
+    let uomCode = '';
+    if (rawEfrisUom && byCode.has(rawEfrisUom)) {
+      uomCode = byCode.get(rawEfrisUom);                         // valid code passed
+    } else if (byName.has(rawName)) {
+      uomCode = byName.get(rawName);                             // resolve "Piece" -> PCE
+    } else if (rawEfrisUom && byName.has(rawEfrisUom.toLowerCase())) {
+      uomCode = byName.get(rawEfrisUom.toLowerCase());           // efrisUom held a name
     }
+    if (!uomCode) {
+      // Unknown unit — report it as a unit problem rather than sending garbage.
+      const sent = rawEfrisUom || (item.uom || '');
+      console.log(`   ⚠ UOM "${sent}" is not a known EFRIS measure unit — asking user to pick.`);
+      return res.json({ success: false, unitProblem: true, sentUnit: sent,
+        validUnits: units.map(u => ({ code: u.code, name: u.name || u.desc || '' })),
+        error: `"${sent}" is not a valid EFRIS measure unit.` });
+    }
+    console.log(`   UOM resolved: uom="${item.uom}" efrisUom="${item.efrisUom}" → code "${uomCode}"`);
 
     // VAT tax item — taxCategoryCode: '01'=standard(18%), '02'=zero-rated, '03'=exempt
     const vatCat = item.vat === 'Exempt' ? '03' : item.vat === 'Zero' ? '02' : '01';
