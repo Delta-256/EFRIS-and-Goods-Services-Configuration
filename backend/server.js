@@ -2064,24 +2064,52 @@ app.post('/api/manager/test', async (req, res) => {
 // ══════════════════════════════════════════════════════════════
 //  FX RATE — Bank of Uganda mid-rate (cached 1h)
 // ══════════════════════════════════════════════════════════════
-let _fxCache = { ts: 0, rates: {} };
+let _fxCache = { ts: 0, rates: {}, source: '' };
+function _httpGet(url, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, { headers: { 'User-Agent': 'EFRISConnect/1.0' } }, r => {
+      // follow one redirect
+      if (r.statusCode >= 300 && r.statusCode < 400 && r.headers.location) {
+        r.resume(); return _httpGet(r.headers.location, timeoutMs).then(resolve, reject);
+      }
+      let d = ''; r.on('data', c => d += c); r.on('end', () => resolve(d));
+    });
+    req.on('error', reject);
+    req.setTimeout(timeoutMs || 8000, () => { req.destroy(new Error('FX source timed out')); });
+  });
+}
+// Primary: Bank of Uganda mid-rates (XML). Fallback: open.er-api.com (UGX base,
+// inverted to "UGX per 1 unit"). Returns whichever succeeds; merges so a currency
+// missing from BOU is still filled from the fallback.
 app.get('/api/fx-rates', async (req, res) => {
   try {
     if (Date.now() - _fxCache.ts < 3600000 && Object.keys(_fxCache.rates).length) {
-      return res.json({ success: true, rates: _fxCache.rates, cached: true });
+      return res.json({ success: true, rates: _fxCache.rates, cached: true, source: _fxCache.source });
     }
-    // Bank of Uganda XML rates feed
-    const xml = await new Promise((resolve, reject) => {
-      https.get('https://www.bou.or.ug/bou/bouwebsite/bouwebsitecontent/statistics/exchangerates/ExchangeRates.xml', r => {
-        let d = ''; r.on('data', c => d += c); r.on('end', () => resolve(d));
-      }).on('error', reject);
-    });
-    const rates = {};
-    const re = /<Currency code="([A-Z]{3})"[^>]*>[\s\S]*?<MidRate>([\d.]+)<\/MidRate>/g;
-    let m;
-    while ((m = re.exec(xml)) !== null) rates[m[1]] = parseFloat(m[2]);
-    _fxCache = { ts: Date.now(), rates };
-    res.json({ success: true, rates });
+    const rates = {}; const sources = [];
+    // 1) Bank of Uganda
+    try {
+      const xml = await _httpGet('https://www.bou.or.ug/bou/bouwebsite/bouwebsitecontent/statistics/exchangerates/ExchangeRates.xml');
+      const re = /<Currency code="([A-Z]{3})"[^>]*>[\s\S]*?<MidRate>([\d.]+)<\/MidRate>/g;
+      let m, n = 0;
+      while ((m = re.exec(xml)) !== null) { const v = parseFloat(m[2]); if (v > 0) { rates[m[1]] = v; n++; } }
+      if (n) sources.push('Bank of Uganda');
+    } catch (e) { console.log('FX: BOU source failed — ' + e.message); }
+    // 2) Fallback / fill gaps: open.er-api.com (free, no key). UGX base.
+    if (!Object.keys(rates).length) {
+      try {
+        const txt = await _httpGet('https://open.er-api.com/v6/latest/UGX');
+        const j = JSON.parse(txt);
+        if (j && j.rates) {
+          for (const code in j.rates) { const per = parseFloat(j.rates[code]); if (per > 0) rates[code] = Math.round((1 / per) * 10000) / 10000; }
+          sources.push('open.er-api.com');
+        }
+      } catch (e) { console.log('FX: er-api fallback failed — ' + e.message); }
+    }
+    if (!Object.keys(rates).length) return res.json({ success: false, error: 'No FX source reachable', rates: {} });
+    const source = sources.join(' + ');
+    _fxCache = { ts: Date.now(), rates, source };
+    res.json({ success: true, rates, source });
   } catch (e) {
     res.json({ success: false, error: e.message, rates: {} });
   }
