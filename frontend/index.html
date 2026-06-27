@@ -3054,9 +3054,9 @@ const _EFRIS_UOM_MAP = {
   'pair':'NPR','pairs':'NPR',
   'yard':'YRD','yards':'YRD',
   'metric ton':'TNE','tonne':'TNE','ton':'TNE','tonnes':'TNE',
-  'piece':'PCE','pieces':'PCE','pce':'PCE',
+  'piece':'PCE','pieces':'PCE','pce':'PCE','each':'PCE','ea':'PCE','item':'PCE','items':'PCE','number':'PCE','no':'PCE',
   'set':'SET',
-  'unit':'UN','each':'UN',
+  'unit':'PCE','units':'PCE',
   'kilometre':'KM','kilometer':'KM','km':'KM','kilometres':'KM',
   'kilowatt hour':'KWH','kwh':'KWH','kilo watt hour':'KWH','kwh -kilo watt hour':'KWH',
   'megawatt hour':'MWH','mwh':'MWH','mega watt hour':'MWH',
@@ -3230,25 +3230,24 @@ async function gSyncToEfris(){
 
 // ── Valid EFRIS measure units (live from T115 dictionary) ──────
 let _validUnits=[];
-// Fetch the live EFRIS unit dictionary once and cache it, so auto-detect can
-// validate against what THIS environment actually accepts (the static uom.json
-// list contains codes like PCE that the sandbox rejects).
+// The authoritative EFRIS goods measure-unit list is the bundled uom.json
+// (served at /api/units) — the same list EFRIS validates T130 against (PCE,
+// KGM, PP, …). This is also offline-capable. NOTE: the live T115 "measureUnit"
+// section returns PACKAGING units (4H-Box, 43-Bag…), which EFRIS does NOT accept
+// as goods measure units — so we deliberately do not use it here.
 async function gLoadValidUnits(){
   if(_validUnits.length) return _validUnits;
-  if(!CFG.tin||!CFG.deviceNo) return [];
   try{
-    const r=await fetch(RELAY+'/api/efris/measure-units',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tin:CFG.tin,deviceNo:CFG.deviceNo,efrisPassword:CFG.efrisPassword,mode:CFG.sandbox?'sandbox':'production'})});
-    const d=await r.json();
-    if(d.success&&d.units&&d.units.length) _validUnits=d.units;
+    const arr=await fetch(RELAY+'/api/units').then(r=>r.json());
+    if(Array.isArray(arr)) _validUnits=arr.map(u=>({code:u.code,name:u.name||u.desc||''})).filter(u=>u.code);
   }catch(_){}
   return _validUnits;
 }
 async function gOpenUnitPicker(){
   const box=$('gUnitPickerBox')||$('gSyncStatus');
-  if(!CFG.tin||!CFG.deviceNo){ alert('Add your TIN and Device No. in Settings first to load EFRIS units.'); return; }
-  box.innerHTML='<div class="st si"><span class="sp">⏳</span> Loading valid EFRIS units…</div>';
+  box.innerHTML='<div class="st si"><span class="sp">⏳</span> Loading EFRIS units…</div>';
   const units=await gLoadValidUnits();
-  if(!units.length){ box.innerHTML='<div class="al aw">Could not load EFRIS units. Check Settings / connection.</div>'; return; }
+  if(!units.length){ box.innerHTML='<div class="al aw">Could not load the EFRIS unit list.</div>'; return; }
   gRenderUnitHelp(box, {validUnits:units, sentUnit:gvi('gFldEfrisUom'), picker:true});
 }
 

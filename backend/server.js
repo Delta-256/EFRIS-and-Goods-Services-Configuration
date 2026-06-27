@@ -1498,7 +1498,9 @@ app.post('/api/efris/register-goods', async (req, res) => {
     let unitProblem = false, validUnits = [];
     if (!ok && (itemRc === '2235' || itemRc === '2234' || /measureunit/i.test(itemRm || ''))) {
       unitProblem = true;
-      try { validUnits = await getEfrisMeasureUnits(tin, deviceNo, session, eu); } catch(_) {}
+      // Offer the goods measure-unit list from uom.json (what EFRIS validates
+      // T130 against) — NOT the live T115 packaging-unit section.
+      try { validUnits = getUnits().map(u => ({ code: u.code, name: u.name || u.desc || '' })); } catch(_) {}
     }
     res.json({ success: ok, returnCode: itemRc, returnMessage: itemRm, alreadyExists,
       unitProblem, sentUnit: uomCode, validUnits,
