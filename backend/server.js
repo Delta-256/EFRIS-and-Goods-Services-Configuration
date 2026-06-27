@@ -1067,16 +1067,16 @@ function efrisFieldSpecs(P) {
   const DOC  = [P.salesInvoice, P.receipt];
   const ITEM = [P.inventoryItem, P.nonInventoryItem];
   return [
-    { create: 'FDN',              match: ['fdn', 'fiscal document number', 'efris fdn'],                 placement: DOC },
-    { create: 'Verification Code',match: ['verification code', 'efris antifake code', 'antifake code'], placement: DOC },
-    { create: 'QR Code',          match: ['qr code', 'efris qr code url', 'efris qr code'],              placement: DOC },
-    { create: 'Device Number',    match: ['device number', 'efris device number'],                      placement: DOC },
-    { create: 'Issued Time',      match: ['issued time', 'efris issued time'],                          placement: DOC },
-    { create: 'Invoice ID',       match: ['invoice id', 'efris invoice id'],                            placement: DOC },
-    { create: 'Status',           match: ['status', 'efris status'],                                    placement: DOC },
-    { create: 'Submission Date',  match: ['submission date', 'efris submission date'],                  placement: DOC },
-    { create: 'Commodity Code',   match: ['commodity code', 'efris commodity code', 'efris commodity'], placement: ITEM },
-    { create: 'Category Path',    match: ['category path', 'efris category path', 'efris segment / class grouping', 'segment / class grouping'], placement: ITEM },
+    { create: 'FDN',              match: ['fdn', 'fiscal document number'],            placement: DOC },
+    { create: 'Verification Code',match: ['verification code', 'antifake code'],       placement: DOC },
+    { create: 'QR Code',          match: ['qr code'],                                  placement: DOC },
+    { create: 'Device Number',    match: ['device number'],                            placement: DOC },
+    { create: 'Issued Time',      match: ['issued time'],                              placement: DOC },
+    { create: 'Invoice ID',       match: ['invoice id'],                               placement: DOC },
+    { create: 'Status',           match: ['status'],                                   placement: DOC },
+    { create: 'Submission Date',  match: ['submission date'],                          placement: DOC },
+    { create: 'Commodity Code',   match: ['commodity code'],                           placement: ITEM },
+    { create: 'Category Path',    match: ['category path', 'segment / class grouping'],placement: ITEM },
   ];
 }
 
