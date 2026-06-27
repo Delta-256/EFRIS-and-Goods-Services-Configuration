@@ -1328,8 +1328,16 @@ function saveSt(){
 }
 function resetAll(){
   if(!confirm('Reset settings for the CURRENT business only? Other saved businesses are kept.'))return;
-  const store=loadProfiles(); const id=profId(CFG);
-  if(id&&store.profiles[id]){ delete store.profiles[id]; const rest=Object.keys(store.profiles); store.active=rest[0]||''; saveProfiles(store); }
+  const store=loadProfiles();
+  const curTok=CFG.accessToken||'', curTin=CFG.tin||'', curId=profId(CFG);
+  // Remove every profile entry that matches the current business (covers stale keys).
+  Object.keys(store.profiles).forEach(id=>{
+    const c=store.profiles[id]||{};
+    if(id===curId || (curTok&&c.accessToken===curTok) || (curTin&&c.tin===curTin)) delete store.profiles[id];
+  });
+  const rest=Object.keys(store.profiles);
+  store.active=rest[0]||'';
+  saveProfiles(store);
   localStorage.removeItem(SKEY);
   location.reload();
 }
@@ -1465,15 +1473,7 @@ async function efrisFieldsCreate(){
 async function testMgr(epId,tkId,resultId){
   const ep=gvi(epId);const tk=gvi(tkId);
   if(!ep||!tk){ht(resultId,'<div class="st se">Enter endpoint and token first</div>');return;}
-  // Warn if the current field values haven't been saved yet
-  const savedEp=(CFG.managerEndpoint||'').replace(/\/+$/,'');
-  const savedTk=CFG.accessToken||'';
-  const epChanged=ep.replace(/\/+$/,'')!==savedEp;
-  const tkChanged=tk!==savedTk;
-  if(epChanged||tkChanged){
-    ht(resultId,'<div class="st sw">⚠ Unsaved changes — click <strong>Save Settings</strong> first, then test again.</div>');
-    return;
-  }
+  // Tests the values currently in the fields (works during onboarding before save).
   ht(resultId,'<div class="st si"><span class="sp">⏳</span> Testing…</div>');
   try{
     const r=await fetch(RELAY+'/api/manager/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({managerEndpoint:ep,accessToken:tk})});
