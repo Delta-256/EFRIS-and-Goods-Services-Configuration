@@ -1311,12 +1311,26 @@ app.post('/api/manager/inventory-adjust', async (req, res) => {
                .filter(i => i.qty > 0 && (i.itemKey || i.itemCode));
   if (!items.length) return res.json({ success: false, error: 'No items with a positive quantity to mirror.' });
 
-  const formPaths = direction === 'in'
-    ? ['/inventory-write-ups-form', '/inventory-write-up-form']
-    : ['/inventory-write-off-form', '/inventory-write-offs-form'];
-  // Manager line shape isn't documented (OpenAPI returns a bare object); try the
-  // most likely field name for the item, then a fallback.
-  const lineShapes = [k => ({ Item: k }), k => ({ InventoryItem: k })];
+  // Build the candidate (method, path, body) attempts for one item+qty. The
+  // probe showed this Manager build has NO write-up endpoint; increases go
+  // through the per-item Starting Balance, decreases through a Write-off doc.
+  const attemptsFor = (key, qty) => {
+    if (direction === 'in') {
+      const flat = extra => Object.assign({ Item: key, Qty: qty }, extra);
+      return [
+        // Starting balance may be keyed by the item itself (PUT) or created (POST)
+        { m: 'PUT',  p: '/inventory-item-starting-balance-form/' + key, b: { Qty: qty, Date: date } },
+        { m: 'POST', p: '/inventory-item-starting-balance-form', b: flat({ Date: date }) },
+        { m: 'POST', p: '/inventory-item-starting-balance-form', b: { InventoryItem: key, Qty: qty, Date: date } },
+        { m: 'POST', p: '/inventory-item-starting-balance-form', b: flat({ Amount: 0, Date: date }) },
+      ];
+    }
+    // decrease → write-off document with lines
+    return [
+      { m: 'POST', p: '/inventory-write-off-form', b: { Date: date, Description: description, Lines: [{ Item: key, Qty: qty }] } },
+      { m: 'POST', p: '/inventory-write-off-form', b: { Date: date, Description: description, Lines: [{ InventoryItem: key, Qty: qty }] } },
+    ];
+  };
 
   const results = [];
   for (const it of items) {
@@ -1334,16 +1348,12 @@ app.post('/api/manager/inventory-adjust', async (req, res) => {
     }
     if (!key) { results.push({ item: it.itemCode || it.itemKey, ok: false, error: 'No item key' }); continue; }
     let done = false, lastErr = '';
-    for (const path of formPaths) {
-      for (const mkLine of lineShapes) {
-        const payload = { Date: date, Description: description, Lines: [Object.assign(mkLine(key), { Qty: it.qty })] };
-        const r = await managerCall(ep, accessToken, 'POST', path, payload);
-        console.log(`   inventory-adjust(${direction}) ${path}: HTTP ${r.status} item=${key} qty=${it.qty}`);
-        if (r.status >= 200 && r.status < 400) { results.push({ item: it.itemCode || key, ok: true, path }); done = true; break; }
-        lastErr = `HTTP ${r.status}: ${JSON.stringify(r.data || '').slice(0, 180)}`;
-        if (r.status !== 404 && r.status !== 400) break; // don't keep retrying on auth/other hard errors
-      }
-      if (done) break;
+    for (const a of attemptsFor(key, it.qty)) {
+      const r = await managerCall(ep, accessToken, a.m, a.p, a.b);
+      console.log(`   inventory-adjust(${direction}) ${a.m} ${a.p}: HTTP ${r.status} item=${key} qty=${it.qty} body=${JSON.stringify(r.data||'').slice(0,160)}`);
+      if (r.status >= 200 && r.status < 400) { results.push({ item: it.itemCode || key, ok: true, path: a.p }); done = true; break; }
+      // Keep the most informative error (a 400/422 body reveals required fields).
+      lastErr = `${a.m} ${a.p} → HTTP ${r.status}: ${JSON.stringify(r.data || '').slice(0, 200)}`;
     }
     if (!done) results.push({ item: it.itemCode || key, ok: false, error: lastErr || 'Manager rejected the adjustment' });
   }
