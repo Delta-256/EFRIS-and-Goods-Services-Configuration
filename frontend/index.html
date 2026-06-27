@@ -1876,7 +1876,7 @@ function wkRenderLines(){
   _wkLines.forEach((l,i)=>{
     const tot=Math.round(((l.qty||1)*(l.price||0)*(1+(l.vatRate||0)/100)-(l.discount||0))*100)/100;
     h+='<tr style="border-bottom:1px solid var(--bdr);">'
-      +'<td style="padding:3px 4px;position:relative;"><input list="wkItemList" value="'+esc(l.desc)+'" style="width:100%;font-size:12px;" oninput="_wkLines['+i+'].desc=this.value;wkAutoFillItem('+i+',this.value)" placeholder="Item or service description"/></td>'
+      +'<td style="padding:3px 4px;position:relative;"><input list="wkItemList" autocomplete="off" value="'+esc(l.desc)+'" style="width:100%;font-size:12px;" oninput="_wkLines['+i+'].desc=this.value;wkSuggest('+i+',this.value);wkAutoFillItem('+i+',this.value)" onfocus="wkSuggest('+i+',this.value)" onblur="setTimeout(function(){wkHideSug('+i+')},200)" placeholder="Item or service description"/><div id="wkSug_'+i+'" style="display:none;position:absolute;left:4px;right:4px;top:100%;z-index:50;background:#fff;border:1px solid var(--bdr);border-radius:0 0 6px 6px;max-height:180px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.12);"></div></td>'
       +'<td style="padding:3px 4px;"><input type="number" value="'+esc(l.qty)+'" style="width:100%;font-size:12px;text-align:right;" oninput="_wkLines['+i+'].qty=+this.value;wkRecalc();wkUpdateTot('+i+')"/></td>'
       +'<td style="padding:3px 4px;"><input list="wkUnitList" value="'+esc(l.unit)+'" style="width:100%;font-size:12px;" oninput="_wkLines['+i+'].unit=this.value" placeholder="Each"/></td>'
       +'<td style="padding:3px 4px;"><input type="number" value="'+esc(l.price)+'" style="width:100%;font-size:12px;text-align:right;" oninput="_wkLines['+i+'].price=+this.value;wkRecalc();wkUpdateTot('+i+')"/></td>'
@@ -1977,6 +1977,21 @@ function wkRebuildDatalist(){
   if(!ul){ ul=document.createElement('datalist'); ul.id='wkUnitList'; document.body.appendChild(ul); }
   ul.innerHTML=['Each','kg','g','Litre','ml','Metre','cm','Box','Pair','Set','Pack','Piece','Hour','Day','Month','Per Person'].map(u=>'<option value="'+u+'">').join('');
 }
+// Native <datalist> dropdowns are unreliable inside Manager Desktop's embedded
+// webview, so drive our own suggestion list as well.
+function wkSuggest(i,val){
+  const box=$('wkSug_'+i); if(!box) return;
+  const q=(val||'').toLowerCase().trim();
+  if(!q||!_wkCatalog.length){ box.style.display='none'; return; }
+  const hits=_wkCatalog.filter(it=>{ const n=(it.name||it.ItemName||'').toLowerCase(), c=(it.code||it.ItemCode||'').toLowerCase(); return n.includes(q)||c.includes(q); }).slice(0,12);
+  if(!hits.length){ box.style.display='none'; return; }
+  box.innerHTML=hits.map(it=>{ const nm=esc(it.name||it.ItemName||''); const pr=it.price?(' · '+(it.currency?it.currency+' ':'')+Number(it.price).toLocaleString()):''; return '<div onmousedown="wkPickItem('+i+',\''+nm.replace(/'/g,"\\'")+'\')" style="padding:6px 9px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--bg2);">'+nm+'<span style="color:var(--gray);font-size:11px;">'+pr+'</span></div>'; }).join('');
+  box.style.display='block';
+}
+function wkPickItem(i,name){
+  _wkLines[i].desc=name; wkHideSug(i); wkAutoFillItem(i,name);
+}
+function wkHideSug(i){ const b=$('wkSug_'+i); if(b) b.style.display='none'; }
 function wkAutoFillItem(i,val){
   const match=_wkCatalog.find(it=>(it.name||it.ItemName||'').toLowerCase()===val.toLowerCase());
   if(!match) return;
