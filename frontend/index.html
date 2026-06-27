@@ -2145,7 +2145,25 @@ function _openReceiptWith(inv, efris){
   const cashAmt=cashPay?parseFloat(String(cashPay.amount||0).replace(/,/g,'')):0;
   const totalAmt=parseFloat(String(inv._total||0).replace(/,/g,''))||0;
   if(cashAmt>totalAmt+0.01){ p.set('cashTendered',cashAmt); p.set('cashChange',Math.round((cashAmt-totalAmt)*100)/100); }
-  window.open(RELAY+'/receipt?'+p.toString(),'_blank');
+  openReceiptUrl(RELAY+'/receipt?'+p.toString());
+}
+
+// Opening a new tab can silently fail when the extension is embedded inside
+// Manager's iframe (the sandbox may block pop-ups) — window.open then returns
+// null and the user sees "no response". Detect that and show a clickable link
+// they can tap directly (a fresh user gesture is allowed to open the tab).
+function openReceiptUrl(url){
+  let w=null;
+  try{ w=window.open(url,'_blank'); }catch(e){}
+  if(w){ try{ w.opener=null; }catch(_){} return; }
+  let box=$('printFallback');
+  if(!box){ box=document.createElement('div'); box.id='printFallback';
+    box.style.cssText='position:fixed;left:0;right:0;bottom:0;z-index:2000;background:#fff3e0;border-top:1px solid #ffcc80;padding:10px 14px;font-size:12px;text-align:center;box-shadow:0 -2px 8px rgba(0,0,0,.12);';
+    document.body.appendChild(box);
+  }
+  box.innerHTML='Your browser blocked the print tab (common inside Manager). '
+    +'<a href="'+esc(url)+'" target="_blank" rel="noopener" style="font-weight:700;color:#1565c0;" onclick="var b=document.getElementById(\'printFallback\');if(b)b.remove();">Open / print the receipt &#8599;</a> '
+    +'<button onclick="document.getElementById(\'printFallback\').remove()" style="margin-left:8px;background:none;border:none;color:var(--gray);cursor:pointer;">dismiss</button>';
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -2487,7 +2505,7 @@ function openReceipt() {
   p.set('description', inv.Description || inv.Reference || '');
   p.set('issuedBy',    CFG.issuedBy || '');
 
-  window.open('/receipt.html?' + p.toString(), '_blank');
+  openReceiptUrl('/receipt.html?' + p.toString());
 }
 
 function showErr(msg){
