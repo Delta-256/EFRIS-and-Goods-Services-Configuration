@@ -1189,7 +1189,11 @@ function ld(){ try{ const r=localStorage.getItem(SKEY); return r?JSON.parse(r):n
 // Each business keeps its OWN config (privacy). Storage holds many profiles
 // keyed by a stable per-business id; `active` points at the current one.
 const PKEY='efris_profiles_v1';
-function profId(cfg){ if(!cfg) return ''; return cfg.tin ? ('tin:'+cfg.tin) : (cfg.accessToken ? ('tok:'+cfg.accessToken.slice(-10)) : (cfg.legalName ? ('biz:'+cfg.legalName.toLowerCase()) : '')); }
+// Key by Manager access token first — in production each Manager business has
+// its OWN API key, so the token is the natural per-business identity. (TIN can
+// be shared across several Manager files, e.g. one taxpayer with multiple books,
+// so it is NOT a reliable key.) Fall back to TIN then business name.
+function profId(cfg){ if(!cfg) return ''; return cfg.accessToken ? ('tok:'+cfg.accessToken) : (cfg.tin ? ('tin:'+cfg.tin) : (cfg.legalName ? ('biz:'+cfg.legalName.toLowerCase()) : '')); }
 function loadProfiles(){ try{ const r=localStorage.getItem(PKEY); const o=r?JSON.parse(r):null; if(o&&o.profiles) return o; }catch(e){} return {active:'', profiles:{}}; }
 function saveProfiles(o){ try{ localStorage.setItem(PKEY,JSON.stringify(o)); }catch(e){} }
 function profLabel(cfg){ return (cfg&&(cfg.tradeName||cfg.legalName))||'(unnamed)'; }
@@ -1331,10 +1335,13 @@ function resetAll(){
 }
 // Start onboarding for a NEW business without touching saved profiles.
 function addBusiness(){
-  CFG={}; INV=null; DKEY=null; _lastInvKey=null;
-  TG.vatReg=false; TG.sandbox=true; TG.efrisEnabled=true;
-  ['o1a','o1b','o1c','o1d','o1e','o2a','o2b','o2c','o2d','o4a','o4b'].forEach(i=>sv(i,''));
-  obSh(1); showScr('sOB');
+  try{
+    CFG={}; INV=null; DKEY=null; _lastInvKey=null; _invDebounce=null;
+    TG.vatReg=false; TG.sandbox=true; TG.efrisEnabled=true;
+    ['o1a','o1b','o1c','o1d','o1e','o2a','o2b','o2c','o2d','o4a','o4b'].forEach(i=>sv(i,''));
+    showScr('sOB'); obSh(1);
+    window.scrollTo(0,0);   // Settings card is far down the page; bring onboarding into view
+  }catch(e){ alert('Could not start onboarding: '+e.message); }
 }
 // Switch to a previously-saved business profile.
 function switchBusiness(id){
