@@ -2132,6 +2132,21 @@ app.get('/api/manager/sb-sample', async (req, res) => {
   } catch (e) { res.json({ success: false, error: e.message }); }
 });
 
+// Diagnostic: read the most recent purchase invoice's form so we learn the
+// exact payload shape to replicate (Lines field names, Account, etc.).
+app.get('/api/manager/pi-sample', async (req, res) => {
+  const { ep, tk } = mgrCreds(req);
+  if (!ep || !tk) return res.status(400).json({ success: false, error: 'ep, tk required' });
+  try {
+    const list = await managerCall(ep, tk, 'GET', '/purchase-invoices', null);
+    const arr = (list.data && (list.data.purchaseInvoices || list.data.PurchaseInvoices || [])) || [];
+    if (!arr.length) return res.json({ success: false, error: 'No purchase invoices found to sample', listKeys: Object.keys(list.data || {}) });
+    const key = arr[0].key || arr[0].Key;
+    const f = await managerCall(ep, tk, 'GET', '/purchase-invoice-form/' + key, null);
+    res.json({ success: f.status === 200, status: f.status, key, form: f.data });
+  } catch (e) { res.json({ success: false, error: e.message }); }
+});
+
 // Force-clean a broken inventory item (e.g. one whose form 404s because a bad
 // starting-balance write corrupted it). Resolves the key by code, then deletes
 // its starting balance and the item itself, reporting each step.
