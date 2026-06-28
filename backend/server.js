@@ -2134,53 +2134,37 @@ app.post('/api/manager/create-credit-note', async (req, res) => {
   }
   if (!origForm) return res.status(404).json({ success: false, error: 'Original document not found in Manager' });
 
-  // Try Manager's credit note form endpoints in order of likelihood
-  const cnPaths = ['/sales-credit-note-form', '/credit-note-form', '/debit-note-form'];
-  let tmpl = null, cnFormBase = null;
+  // Build a native Credit Note (so it lands in Manager's Credit Notes tab, not as
+  // a negative sales invoice). POST directly — Manager form endpoints 500/404 on a
+  // bare GET, so we must not GET-probe them.
+  let cfMeta = null; try { cfMeta = await mgrTextCustomFields(ep, accessToken); } catch (_) {}
+  const cnForm = {
+    Date: new Date().toISOString().slice(0, 10),
+    Reference: 'CN-' + (origForm.Reference || origForm.InvoiceNumber || originalKey.slice(0, 8)),
+    Description: reason + (efrisFdn ? ' | Credit Note FDN: ' + efrisFdn : ''),
+    HasLineDescription: true, QuantityColumn: true, UnitPriceColumn: true,
+  };
+  if (origForm.Customer) cnForm.Customer = origForm.Customer;
+  else if (origForm.Contact) cnForm.Contact = origForm.Contact;
+  if (Array.isArray(origForm.Lines)) cnForm.Lines = origForm.Lines.map(l => ({ Item: l.Item, LineDescription: l.LineDescription, Qty: parseFloat(l.Qty) || 1, UnitPrice: parseFloat(l.UnitPrice) || 0 }));
+  if (cfMeta) applyCnEfris(cnForm, cfMeta);
+  const cnPaths = ['/credit-note-form', '/sales-credit-note-form', '/customer-credit-note-form'];
+  let lastCnErr = '';
   for (const path of cnPaths) {
     try {
-      const r = await managerCall(ep, accessToken, 'GET', path, null);
-      if (r.status === 200 && r.data && !r.data.error) { tmpl = r.data; cnFormBase = path; break; }
-    } catch(_) {}
-  }
-
-  if (tmpl && cnFormBase) {
-    // Use Manager's native credit note form
-    const form = Object.assign({}, tmpl);
-    delete form.Key; delete form.key; delete form.id; delete form.UniqueName;
-    form.Date = new Date().toISOString().slice(0, 10);
-    form.Reference = 'CN-' + (origForm.Reference || origForm.InvoiceNumber || originalKey.slice(0, 8));
-    form.Description = reason + (efrisFdn ? ' | Original FDN: ' + efrisFdn : '');
-    // Link original document if field exists
-    if ('SalesInvoice' in tmpl) form.SalesInvoice = originalKey;
-    else if ('Receipt' in tmpl) form.Receipt = originalKey;
-    else if ('OriginalInvoice' in tmpl) form.OriginalInvoice = originalKey;
-    // Copy lines from original (negative qty = credit)
-    if (origForm.Lines) form.Lines = origForm.Lines;
-    // Copy customer
-    if (origForm.Customer) form.Customer = origForm.Customer;
-    else if (origForm.Contact) form.Contact = origForm.Contact;
-
-    const createR = await managerCall(ep, accessToken, 'POST', cnFormBase, form);
-    let newKey = null;
-    if (createR.data && createR.data.key) newKey = createR.data.key;
-    else if (createR.data && createR.data.Key) newKey = createR.data.Key;
-    console.log(`   Manager credit note created via ${cnFormBase} → key: ${newKey || 'unknown'}`);
-
-    // Save EFRIS FDN to the new credit note record if we got a key
-    if (newKey && efrisFdn) {
-      try {
-        const cfMeta = await mgrTextCustomFields(ep, accessToken);
-        const getCN = await managerCall(ep, accessToken, 'GET', cnFormBase + '/' + newKey, null);
-        if (getCN.status === 200 && getCN.data) {
-          const cnForm = getCN.data;
-          applyCnEfris(cnForm, cfMeta);
-          await managerCall(ep, accessToken, 'POST', cnFormBase + '/' + newKey, cnForm);
+      const r = await managerCall(ep, accessToken, 'POST', path, cnForm);
+      if (r.status >= 200 && r.status < 400) {
+        let newKey = (r.data && (r.data.key || r.data.Key)) || null;
+        if (!newKey) { // re-list to find it
+          try { const lr = await managerCall(ep, accessToken, 'GET', path.replace('-form', 's'), null); const arr = (lr.data && (lr.data.creditNotes || lr.data.salesCreditNotes || [])) || []; const hit = arr.find(x => (x.reference || x.Reference) === cnForm.Reference); if (hit) newKey = hit.key || hit.Key; } catch (_) {}
         }
-      } catch(_) {}
-    }
-    return res.json({ success: true, key: newKey, method: cnFormBase });
+        console.log(`   Manager credit note created via ${path} → key: ${newKey || 'unknown'}`);
+        return res.json({ success: true, key: newKey, method: path });
+      }
+      if (r.status !== 404) lastCnErr = `${path} HTTP ${r.status}: ${JSON.stringify(r.data || '').slice(0, 150)}`;
+    } catch (e) { lastCnErr = path + ': ' + e.message; }
   }
+  console.log(`   No native credit-note endpoint worked (${lastCnErr}) — using negative-invoice fallback`);
 
   // Fallback: no native credit note form — create a negative receipt/invoice
   console.log('   No credit note form found — creating negative receipt as fallback');
