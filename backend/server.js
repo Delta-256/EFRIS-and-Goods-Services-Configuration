@@ -2118,6 +2118,20 @@ app.post('/api/efris/dictionary-dump', async (req, res) => {
   } catch (e) { res.json({ success: false, error: e.message }); }
 });
 
+// Diagnostic: read an inventory item's starting-balance form so we learn the
+// exact field shape (after the user sets one manually in Manager's UI).
+app.get('/api/manager/sb-sample', async (req, res) => {
+  const { ep, tk } = mgrCreds(req);
+  const code = (req.query.code || '').trim();
+  if (!ep || !tk || !code) return res.status(400).json({ success: false, error: 'ep, tk, code required' });
+  try {
+    const resolved = await resolveManagerItemKey(ep, tk, code);
+    if (!resolved.key) return res.json({ success: false, error: 'item not found', reason: resolved.reason });
+    const g = await managerCall(ep, tk, 'GET', '/inventory-item-starting-balance-form/' + resolved.key, null);
+    res.json({ success: g.status === 200, status: g.status, key: resolved.key, form: g.data });
+  } catch (e) { res.json({ success: false, error: e.message }); }
+});
+
 // Force-clean a broken inventory item (e.g. one whose form 404s because a bad
 // starting-balance write corrupted it). Resolves the key by code, then deletes
 // its starting balance and the item itself, reporting each step.
