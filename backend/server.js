@@ -2197,6 +2197,21 @@ app.get('/api/manager/sb-sample', async (req, res) => {
   } catch (e) { res.json({ success: false, error: e.message }); }
 });
 
+// Diagnostic: read the latest receipt's full form so we learn the payer fields
+// (Contact/Payer) and the custom-field structure (dropdowns etc.).
+app.get('/api/manager/receipt-sample', async (req, res) => {
+  const { ep, tk } = mgrCreds(req);
+  if (!ep || !tk) return res.status(400).json({ success: false, error: 'ep, tk required' });
+  try {
+    const list = await managerCall(ep, tk, 'GET', '/receipts', null);
+    const arr = (list.data && (list.data.receipts || list.data.receiptsAndPayments || list.data.Receipts || [])) || [];
+    if (!arr.length) return res.json({ success: false, error: 'No receipts found', listKeys: Object.keys(list.data || {}) });
+    const key = arr[0].key || arr[0].Key;
+    const f = await managerCall(ep, tk, 'GET', '/receipt-form/' + key, null);
+    res.json({ success: f.status === 200, status: f.status, key, form: f.data, formKeys: Object.keys(f.data || {}) });
+  } catch (e) { res.json({ success: false, error: e.message }); }
+});
+
 // Diagnostic: list custom themes + read one form, so we learn the theme shape
 // (name + Liquid/HTML body field) to create a branded default theme.
 app.get('/api/manager/theme-sample', async (req, res) => {
