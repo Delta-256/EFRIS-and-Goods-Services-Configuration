@@ -1614,6 +1614,9 @@ function renderInv(inv){
   if(autoType!=='b2b'){sv('cTIN',''); ht('cTINResult','');}
   if(autoType!=='b2g'){sv('cGovTIN',''); sv('cGovDept',''); ht('cGovTINResult','');}
   if(autoType!=='foreign'){sv('cPassport',''); sv('cNationality',''); sv('cForeignName','');}
+  // Manager custom fields (declared before use — referenced for type/payment below)
+  const s=inv.CustomFields||{};
+  const sGet=(...k)=>{ for(const n of k){if(s[n])return s[n];} return null; };
   // Override with Manager custom fields if set
   const mgrCustType=sGet('Customer Type','CustomerType');
   if(mgrCustType){
@@ -1641,8 +1644,6 @@ function renderInv(inv){
     if(lines.length>5)h+='<div class="irow"><span style="color:var(--gray)">…'+(lines.length-5)+' more</span></div>';
     h+='</div>';ht('dItems',h);
   }
-  const s=inv.CustomFields||{};
-  const sGet=(...k)=>{ for(const n of k){if(s[n])return s[n];} return null; };
   const sFdn=sGet('Fiscal Document Number','EFRIS FDN');
   const sSt=sGet('Status','EFRIS Status');
   const sDt=sGet('Submission Date','EFRIS Submission Date');
