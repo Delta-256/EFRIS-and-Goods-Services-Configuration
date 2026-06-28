@@ -2219,6 +2219,21 @@ app.get('/api/manager/sb-sample', async (req, res) => {
   } catch (e) { res.json({ success: false, error: e.message }); }
 });
 
+// Diagnostic: find the working custom-theme read path + content field name, so
+// the extension can create/update the branded theme via the API.
+app.get('/api/manager/theme-probe', async (req, res) => {
+  const { ep, tk } = mgrCreds(req);
+  const key = (req.query.key || '').trim();
+  if (!ep || !tk) return res.status(400).json({ success: false, error: 'ep, tk required' });
+  const out = {};
+  const tryGet = async (p) => { try { const r = await managerCall(ep, tk, 'GET', p, null); out[p] = { status: r.status, keys: r.data && typeof r.data === 'object' ? Object.keys(r.data).slice(0, 25) : (''+r.data).slice(0, 60) }; } catch (e) { out[p] = 'err:' + (e.message || '').slice(0, 40); } };
+  // list-style endpoints
+  for (const p of ['/custom-themes', '/manager-themes', '/themes', '/custom-theme-form']) await tryGet(p);
+  // by-key form endpoints
+  if (key) for (const p of ['/custom-theme-form/' + key, '/manager-theme/' + key, '/manager-theme-form/' + key, '/custom-theme/' + key, '/theme-form/' + key]) await tryGet(p);
+  res.json({ success: true, key, results: out });
+});
+
 // Diagnostic: read the latest receipt's full form so we learn the payer fields
 // (Contact/Payer) and the custom-field structure (dropdowns etc.).
 app.get('/api/manager/receipt-sample', async (req, res) => {
@@ -2669,6 +2684,21 @@ app.use(express.static(FRONTEND));
 // Dedicated receipt viewer — must be before the SPA catch-all
 app.get('/receipt', (req, res) => {
   res.sendFile(path.join(FRONTEND, 'receipt.html'));
+});
+
+// The branded Manager custom-theme HTML, served as plain text so it can be
+// copied and pasted into Manager → Settings → Themes.
+app.get('/branded-theme', (req, res) => {
+  try {
+    let html = fs.readFileSync(path.join(FRONTEND, 'manager-theme.html'), 'utf8');
+    // Inline the offline QR encoder so the theme is fully self-contained.
+    try {
+      const lib = fs.readFileSync(path.join(FRONTEND, 'qrcode.lib.js'), 'utf8');
+      html = html.replace('<!--@QRLIB@-->', '<script>\n' + lib + '\n</script>');
+    } catch (_) {}
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.send(html);
+  } catch (e) { res.status(500).send('theme not found'); }
 });
 
 app.get('*', (req, res) => {
