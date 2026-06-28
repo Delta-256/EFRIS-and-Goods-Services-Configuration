@@ -150,8 +150,10 @@ body { font-family: var(--sans); background: #e8ece8; color: var(--text); min-he
 
 <!-- Controls -->
 <div id="controls">
-  <label>Primary colour <input type="color" id="clrAccent" value="#1b4332" oninput="applyColors()"/></label>
-  <label>Stamp colour <input type="color" id="clrStamp" value="#c9963a" oninput="applyColors()"/></label>
+  <label>Primary colour <input type="color" id="clrAccent" value="#1b4332" oninput="syncHex('clrAccent','clrAccentHex');applyColors()"/>
+    <input type="text" id="clrAccentHex" value="#1b4332" spellcheck="false" oninput="syncPicker('clrAccentHex','clrAccent');applyColors()" style="width:84px;font-family:monospace;font-size:11px;padding:2px 4px;" title="HEX e.g. #1b4332 — you can also type rgb(27,67,50) or a colour name"/></label>
+  <label>Stamp colour <input type="color" id="clrStamp" value="#c9963a" oninput="syncHex('clrStamp','clrStampHex');applyColors()"/>
+    <input type="text" id="clrStampHex" value="#c9963a" spellcheck="false" oninput="syncPicker('clrStampHex','clrStamp');applyColors()" style="width:84px;font-family:monospace;font-size:11px;padding:2px 4px;" title="HEX e.g. #c9963a — you can also type rgb(...) or a colour name"/></label>
   <div class="ctrl-sep"></div>
   <label><input type="checkbox" id="chkLogo" checked onchange="toggleVis('logoArea',this.checked)"/> Logo</label>
   <label><input type="checkbox" id="chkServed" checked onchange="toggleVis('servedBy',this.checked)"/> Served by</label>
@@ -164,7 +166,14 @@ body { font-family: var(--sans); background: #e8ece8; color: var(--text); min-he
     <option value="Invoice">Invoice</option>
     <option value="Credit Note">Credit Note</option>
   </select></label>
+  <label>Page <select id="selPage" onchange="setPageSize(this.value)">
+    <option value="A4">A4</option>
+    <option value="A5">A5 (half)</option>
+    <option value="Letter">Letter</option>
+    <option value="80mm">80mm receipt</option>
+  </select></label>
   <button id="printBtn" onclick="window.print()">Print / Save PDF</button>
+  <div style="flex-basis:100%;font-size:10px;color:#777;margin-top:2px;">Colours default to <strong>HEX</strong> (e.g. #1b4332). You can also type <strong>rgb(…)</strong> or a colour name in the box. Pick a smaller <strong>Page</strong> size for compact/thermal printing.</div>
 </div>
 
 <div id="sheet">
@@ -652,11 +661,22 @@ function render() {
 
 /* ── Controls ── */
 function applyColors() {
-  const a = el('clrAccent').value;
-  const s = el('clrStamp').value;
+  // Prefer the text box (accepts HEX, rgb(), or colour names); fall back to picker.
+  const a = (el('clrAccentHex') && el('clrAccentHex').value.trim()) || el('clrAccent').value;
+  const s = (el('clrStampHex') && el('clrStampHex').value.trim()) || el('clrStamp').value;
   document.documentElement.style.setProperty('--accent', a);
   document.documentElement.style.setProperty('--accent-lt', a);
   document.documentElement.style.setProperty('--stamp', s);
+}
+// Keep the colour picker and its HEX text box in sync.
+function syncHex(pickerId, hexId){ const p=el(pickerId), h=el(hexId); if(p&&h) h.value=p.value; }
+function syncPicker(hexId, pickerId){ const h=el(hexId), p=el(pickerId); if(h&&p){ const v=h.value.trim(); if(/^#[0-9a-fA-F]{6}$/.test(v)) p.value=v; } }
+// Switch the print page size (and on-screen sheet width).
+function setPageSize(v){
+  const sizes={A4:['210mm 297mm',794],A5:['148mm 210mm',559],Letter:['216mm 279mm',816],'80mm':['80mm auto',302]};
+  const cfg=sizes[v]||sizes.A4;
+  let st=document.getElementById('pageStyle'); if(!st){ st=document.createElement('style'); st.id='pageStyle'; document.head.appendChild(st); }
+  st.textContent='@media print{@page{size:'+cfg[0]+';margin:0;}} #sheet{width:'+cfg[1]+'px;min-height:auto;}';
 }
 function toggleVis(id, show) { const e=el(id); if(e) e.style.display = show?'':'none'; }
 function setDocType(val) { setTxt('docTypeLabel', val); }
