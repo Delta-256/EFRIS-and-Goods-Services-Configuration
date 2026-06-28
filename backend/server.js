@@ -1237,7 +1237,29 @@ app.post('/api/manager/create-receipt', async (req, res) => {
     const form = {};
     form.Date = receipt.date || new Date().toISOString().slice(0, 10);
     if (receipt.reference) form.Reference = receipt.reference;
-    if (receipt.customer)   form.Contact    = receipt.customer;
+    // "Paid by" needs a Customer KEY (a bare name shows as "Other"). Resolve the
+    // name to an existing customer, else create one, then link it.
+    if (receipt.customer) {
+      const custName = String(receipt.customer).trim();
+      let custKey = '';
+      try {
+        const cr = await managerCall(ep, accessToken, 'GET', '/customers', null);
+        const arr = (cr.data && (cr.data.customers || cr.data.Customers || [])) || [];
+        const hit = arr.find(c => String(c.name || c.Name || '').trim().toLowerCase() === custName.toLowerCase());
+        if (hit) custKey = hit.key || hit.Key || '';
+        if (!custKey) {
+          const nc = await managerCall(ep, accessToken, 'POST', '/customer-form', { Name: custName });
+          if (nc.status >= 200 && nc.status < 400) {
+            custKey = (nc.data && (nc.data.key || nc.data.Key)) || '';
+            if (!custKey) { // re-list to find the new key
+              try { const cr2 = await managerCall(ep, accessToken, 'GET', '/customers', null); const a2 = (cr2.data && (cr2.data.customers || cr2.data.Customers || [])) || []; const h2 = a2.find(c => String(c.name || c.Name || '').trim().toLowerCase() === custName.toLowerCase()); if (h2) custKey = h2.key || h2.Key || ''; } catch (_) {}
+            }
+            console.log(`   Created Manager customer "${custName}" → ${custKey || 'unknown'}`);
+          }
+        }
+      } catch (_) {}
+      if (custKey) form.Contact = custKey; // links as Customer
+    }
     if (receivedIn)         form.ReceivedIn  = receivedIn;
     if (receipt.description) form.Description = receipt.description;
     form.QuantityColumn = true;
@@ -2216,17 +2238,15 @@ app.get('/api/manager/receipt-sample', async (req, res) => {
 // (name + Liquid/HTML body field) to create a branded default theme.
 app.get('/api/manager/theme-sample', async (req, res) => {
   const { ep, tk } = mgrCreds(req);
+  const key = (req.query.key || '').trim();
   if (!ep || !tk) return res.status(400).json({ success: false, error: 'ep, tk required' });
   try {
-    const list = await managerCall(ep, tk, 'GET', '/custom-themes', null);
-    const arr = (list.data && (list.data.customThemes || list.data.CustomThemes || [])) || [];
-    const out = { success: true, count: arr.length, listKeys: Object.keys(list.data || {}), themes: arr.map(t => ({ key: t.key || t.Key, name: t.name || t.Name })) };
-    if (arr.length) {
-      const key = arr[0].key || arr[0].Key;
+    if (key) {
       const f = await managerCall(ep, tk, 'GET', '/custom-theme-form/' + key, null);
-      out.sampleKey = key; out.form = f.data; out.formKeys = Object.keys(f.data || {});
+      return res.json({ success: f.status === 200, status: f.status, key, form: f.data, formKeys: Object.keys(f.data || {}) });
     }
-    res.json(out);
+    // No list endpoint exists; pass ?key=<theme key> (shown top-right in the theme editor).
+    res.json({ success: false, error: 'No theme list endpoint — pass ?key=<theme key from the editor URL>' });
   } catch (e) { res.json({ success: false, error: e.message }); }
 });
 
