@@ -2790,9 +2790,12 @@ function resolveNext(s) {
   const now = new Date();
   const year  = String(now.getFullYear());
   const ym    = year + '-' + String(now.getMonth() + 1).padStart(2, '0');
+  const startAt = parseInt(s.startAt) || 1;
   let counter = (s.lastCounter || 0) + 1;
-  if (s.resetOn === 'yearly'  && s.lastReset !== year) counter = 1;
-  if (s.resetOn === 'monthly' && s.lastReset !== ym)   counter = 1;
+  // When a reset period rolls over, restart at the series' starting number — NOT
+  // hardcoded 1 (otherwise the configured start, e.g. 25, is ignored).
+  if (s.resetOn === 'yearly'  && s.lastReset && s.lastReset !== year) counter = startAt;
+  if (s.resetOn === 'monthly' && s.lastReset && s.lastReset !== ym)   counter = startAt;
   return counter;
 }
 
@@ -2809,7 +2812,14 @@ app.get('/api/number-series', (req, res) => {
 
 app.post('/api/number-series', (req, res) => {
   const series = loadSeries();
-  const s = { ...req.body, id: crypto.randomUUID(), lastCounter: (req.body.startAt || 1) - 1, lastReset: '' };
+  const now = new Date();
+  const year = String(now.getFullYear());
+  const ym   = year + '-' + String(now.getMonth() + 1).padStart(2, '0');
+  // Initialise lastReset to the CURRENT period so the reset rule doesn't fire on the
+  // very first number and wipe out the configured starting number.
+  const lastReset = req.body.resetOn === 'monthly' ? ym : (req.body.resetOn === 'yearly' ? year : '');
+  const startAt = parseInt(req.body.startAt) || 1;
+  const s = { ...req.body, id: crypto.randomUUID(), startAt, lastCounter: startAt - 1, lastReset };
   series.push(s);
   saveSeries(series);
   res.json({ success: true, series: { ...s, preview: buildNumber(s, resolveNext(s)) } });

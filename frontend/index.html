@@ -292,7 +292,12 @@
     <div class="card">
       <div class="ct" style="display:flex;align-items:center;justify-content:space-between;"><span><span class="ico-emoji">&#129534;</span><svg class="ico-svg" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg> Invoice Details</span><button class="btn bo bsm" onclick="DKEY=null;_lastInvKey=null;showSubPicker();" style="font-size:10px;padding:3px 8px;">&#8592; All Invoices</button></div>
       <div class="ig">
-        <div class="if"><div class="lb">Invoice No. <span style="font-weight:400;color:var(--gray);">(editable)</span></div><input id="dNo" class="vl" style="border:1px solid var(--bdr);border-radius:4px;padding:3px 6px;font-size:13px;width:100%;"/></div>
+        <div class="if"><div class="lb">Invoice No. <span style="font-weight:400;color:var(--gray);">(editable)</span></div>
+          <div style="display:flex;gap:4px;">
+            <input id="dNo" class="vl" style="border:1px solid var(--bdr);border-radius:4px;padding:3px 6px;font-size:13px;flex:1;"/>
+            <select class="series-picker" data-target="dNo" data-doc="invoice" onchange="applySeriesTo(this)" style="font-size:11px;max-width:120px;"><option value="">Series…</option></select>
+          </div>
+        </div>
         <div class="if"><div class="lb">Date</div><div class="vl" id="dDt">&mdash;</div></div>
         <div class="if full"><div class="lb">Customer</div><div class="vl" id="dCust">&mdash;</div></div>
         <div class="if"><div class="lb">Currency <span style="font-weight:400;color:var(--gray);">(editable)</span></div>
@@ -409,8 +414,11 @@
         </div>
       </div>
       <div class="fg" style="margin:0 0 8px;"><label>Receipt No.</label>
-        <input id="wkRef" placeholder="e.g. REC-001"/>
-        <span class="hint" style="font-size:10px;color:var(--gray);">Auto-generated — edit to use your own format (a default prefix can be set in Settings).</span>
+        <div style="display:flex;gap:6px;">
+          <input id="wkRef" placeholder="e.g. REC-001" style="flex:1;"/>
+          <select class="series-picker" data-target="wkRef" data-doc="receipt" onchange="applySeriesTo(this)" style="flex:0 0 auto;max-width:150px;font-size:12px;"><option value="">Number series…</option></select>
+        </div>
+        <span class="hint" style="font-size:10px;color:var(--gray);">Auto-generated — edit it, or pick a Number Series to generate the next number.</span>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;" id="wkFxRow" class="hidden">
         <div class="fg" style="margin:0;"><label>Exchange Rate (1 <span id="wkFxLbl">USD</span> = UGX)</label><input id="wkFxVal" type="number" placeholder="e.g. 3700" oninput="wkRecalc()"/></div>
@@ -474,8 +482,8 @@
   <div id="tBulk" class="hidden">
     <div class="card">
       <div class="ct">&#9654; Bulk Submit to EFRIS</div>
-      <p style="font-size:12px;color:var(--gray);margin:0 0 10px;">Enter Manager invoice IDs (one per line). Each will be loaded and submitted to EFRIS in sequence.</p>
-      <textarea id="bulkIds" rows="6" placeholder="INV-0001&#10;INV-0002&#10;INV-0003" style="width:100%;box-sizing:border-box;font-family:monospace;font-size:12px;padding:8px;border:1px solid var(--bdr);border-radius:6px;resize:vertical;"></textarea>
+      <p style="font-size:12px;color:var(--gray);margin:0 0 10px;">Enter one invoice/receipt <strong>reference</strong> per line (exactly as shown in Manager, e.g. <code>43</code> or <code>INV-0001</code>). Each is resolved to its document, loaded, and submitted to EFRIS in sequence. Already-submitted documents are skipped.</p>
+      <textarea id="bulkIds" rows="6" placeholder="43&#10;INV-0002&#10;500260628014" style="width:100%;box-sizing:border-box;font-family:monospace;font-size:12px;padding:8px;border:1px solid var(--bdr);border-radius:6px;resize:vertical;"></textarea>
       <div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;">
         <button class="btn bsm" id="bulkStartBtn" onclick="bulkStart()">&#9654; Start Bulk Submit</button>
         <button class="btn bo bsm" onclick="bulkClear()">Clear</button>
@@ -740,6 +748,7 @@
     <div class="card">
       <div class="ct">&#128290; Document Number Series</div>
       <p style="font-size:12px;color:var(--gray);margin-bottom:10px;">Define how your invoice and receipt numbers are generated. Each series has its own prefix, division or project code, date component and auto-incrementing counter.</p>
+      <div id="numGenBanner" style="display:none;margin-bottom:10px;"></div>
       <div id="numList"></div>
       <button class="btn bg mt" onclick="numShowForm()">+ New Series</button>
     </div>
@@ -1585,6 +1594,7 @@ async function loadInv(key){
 
 function renderInv(inv){
   window._subRefOverride=''; // clear any prior renumber override on a fresh load
+  loadSeriesOptions();
   sv('dNo',inv.Reference||inv.Code||inv.InvoiceNo||'');
   tx('dDt',fd(inv.IssueDate||inv.Date));
   tx('dCust',(inv.Customer&&inv.Customer.Name)||inv.BuyerName||inv.CustomerName||'—');
@@ -1886,7 +1896,7 @@ async function histDelete(id){
 var _wkType='b2c', _wkLines=[], _wkPays=[], _wkLastResult=null;
 
 function wkInit(){
-  wkLoadCatalog(); wkRebuildDatalist();
+  wkLoadCatalog(); wkRebuildDatalist(); loadSeriesOptions();
   if(_wkLines.length) return; // already initialised
   wkReset();
 }
@@ -2355,17 +2365,37 @@ async function bulkStart(){
   }
   renderBulkTable();
   const ep = CFG.managerEndpoint||MGR_EP, tk = CFG.accessToken||MGR_TK;
+  // The user types references/numbers (e.g. "43"), but Manager loads documents by
+  // their KEY (a UUID). Resolve each entered value to a key via the document list,
+  // matching on reference or number — otherwise the loader 500s ("not found").
+  const UUID_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  let refMap=null;
+  if(rows.some(r=>!UUID_RE.test(r.id))){
+    try{
+      const lr=await fetch(RELAY+'/api/manager/invoices?ep='+encodeURIComponent(ep)+'&tk='+encodeURIComponent(tk));
+      const ld=await lr.json();
+      refMap={};
+      (ld.invoices||[]).forEach(d=>{ const k=(d.reference||'').toString().trim().toLowerCase(); if(k&&!refMap[k]) refMap[k]=d.key; });
+    }catch(e){ refMap={}; }
+  }
   for(let i=0;i<rows.length;i++){
     const row=rows[i];
     row.status='running'; renderBulkTable();
     try{
+      // Resolve a typed reference to a document key when needed.
+      let key=row.id;
+      if(!UUID_RE.test(key)){
+        const found=refMap&&refMap[key.trim().toLowerCase()];
+        if(!found) throw new Error('No invoice/receipt found with reference "'+key+'". Use the exact reference shown in Manager.');
+        key=found;
+      }
       // Load invoice from Manager
-      const invUrl=RELAY+'/api/manager/invoice?ep='+encodeURIComponent(ep)+'&tk='+encodeURIComponent(tk)+'&key='+encodeURIComponent(row.id);
+      const invUrl=RELAY+'/api/manager/invoice?ep='+encodeURIComponent(ep)+'&tk='+encodeURIComponent(tk)+'&key='+encodeURIComponent(key);
       const invR=await fetch(invUrl);
       const invD=await invR.json();
       if(!invD.success) throw new Error(invD.error||'Failed to load invoice');
       // Set global state so buildInv() works
-      INV=invD.data; DKEY=row.id;
+      INV=invD.data; DKEY=key;
       // Auto-detect customer type
       const s=INV.CustomFields||{};
       const sGet=(...k)=>{ for(const n of k){if(s[n])return s[n];} return null; };
@@ -2405,10 +2435,36 @@ async function bulkStart(){
 // ══════════════════════════════════════════════════════════════
 var _numSeries = [];
 
+// Populate every <select class="series-picker"> with the series that apply to its
+// document type (data-doc = invoice|receipt; 'both' always matches).
+async function loadSeriesOptions(){
+  let list=_numSeries;
+  if(!list||!list.length){ try{ const r=await fetch(RELAY+'/api/number-series'); list=await r.json(); _numSeries=list; }catch(e){ return; } }
+  document.querySelectorAll('select.series-picker').forEach(sel=>{
+    const doc=sel.getAttribute('data-doc');
+    const opts=(list||[]).filter(s=>s.docType==='both'||s.docType===doc);
+    const first=sel.options[0]?sel.options[0].outerHTML:'<option value="">Number series…</option>';
+    sel.innerHTML=first+opts.map(s=>'<option value="'+esc(s.id)+'">'+esc(s.name)+' → '+esc(s.preview||'')+'</option>').join('');
+  });
+}
+// Generate the next number from a series and drop it into the picker's target field.
+async function applySeriesTo(sel){
+  const id=sel.value; const targetId=sel.getAttribute('data-target');
+  if(!id||!targetId){ return; }
+  try{
+    const r=await fetch(RELAY+'/api/number-series/'+id+'/next',{method:'POST'});
+    const d=await r.json();
+    if(d.success){ const t=$(targetId); if(t){ t.value=d.number; t.dispatchEvent(new Event('input')); } loadSeriesOptions(); }
+    else alert(d.error||'Could not generate number');
+  }catch(e){ alert('Number series error: '+e.message); }
+  sel.value='';
+}
+
 async function numLoad(){
   try{
     const r=await fetch(RELAY+'/api/number-series');
     _numSeries=await r.json();
+    loadSeriesOptions();
     numRender();
   }catch(e){ ht('numList','<div class="al aw">Could not load series: '+esc(e.message)+'</div>'); }
 }
@@ -2445,13 +2501,17 @@ async function numGenerate(id){
     const r=await fetch(RELAY+'/api/number-series/'+id+'/next',{method:'POST'});
     const d=await r.json();
     if(!d.success) throw new Error(d.error||'Failed');
-    ht('numResult_'+id,`
-      <div style="display:flex;align-items:center;gap:8px;background:#f0f7f0;border:1px solid #c8e6c9;border-radius:6px;padding:8px 12px;">
-        <span style="font-family:monospace;font-size:16px;font-weight:700;color:var(--gd);flex:1;" id="numVal_${id}">${esc(d.number)}</span>
-        <button class="btn bo bsm" onclick="numCopy('${id}','${d.number}')">&#128203; Copy</button>
-      </div>`);
+    // Write to a PERSISTENT banner above the list — numLoad() re-renders the list and
+    // would otherwise immediately wipe a per-card result box (the "flash and vanish").
+    const b=$('numGenBanner');
+    if(b){ b.style.display=''; b.innerHTML=
+      '<div style="display:flex;align-items:center;gap:8px;background:#f0f7f0;border:1px solid #c8e6c9;border-radius:6px;padding:10px 12px;">'
+      +'<span style="font-size:11px;color:var(--gray);">Generated</span>'
+      +'<span style="font-family:monospace;font-size:17px;font-weight:700;color:var(--gd);flex:1;">'+esc(d.number)+'</span>'
+      +'<button class="btn bo bsm" onclick="navigator.clipboard&&navigator.clipboard.writeText(\''+esc(d.number)+'\')">&#128203; Copy</button>'
+      +'<button class="btn bo bsm" onclick="$(\'numGenBanner\').style.display=\'none\'">&#10005;</button></div>'; }
     numLoad();
-  }catch(e){ ht('numResult_'+id,'<div class="al aw">'+esc(e.message)+'</div>'); }
+  }catch(e){ const b=$('numGenBanner'); if(b){ b.style.display=''; b.innerHTML='<div class="al aw">'+esc(e.message)+'</div>'; } }
 }
 
 function numCopy(id, val){
