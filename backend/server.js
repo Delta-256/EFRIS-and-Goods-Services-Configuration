@@ -2238,17 +2238,15 @@ app.get('/api/manager/receipt-sample', async (req, res) => {
 // (name + Liquid/HTML body field) to create a branded default theme.
 app.get('/api/manager/theme-sample', async (req, res) => {
   const { ep, tk } = mgrCreds(req);
+  const key = (req.query.key || '').trim();
   if (!ep || !tk) return res.status(400).json({ success: false, error: 'ep, tk required' });
   try {
-    const list = await managerCall(ep, tk, 'GET', '/custom-themes', null);
-    const arr = (list.data && (list.data.customThemes || list.data.CustomThemes || [])) || [];
-    const out = { success: true, count: arr.length, listKeys: Object.keys(list.data || {}), themes: arr.map(t => ({ key: t.key || t.Key, name: t.name || t.Name })) };
-    if (arr.length) {
-      const key = arr[0].key || arr[0].Key;
+    if (key) {
       const f = await managerCall(ep, tk, 'GET', '/custom-theme-form/' + key, null);
-      out.sampleKey = key; out.form = f.data; out.formKeys = Object.keys(f.data || {});
+      return res.json({ success: f.status === 200, status: f.status, key, form: f.data, formKeys: Object.keys(f.data || {}) });
     }
-    res.json(out);
+    // No list endpoint exists; pass ?key=<theme key> (shown top-right in the theme editor).
+    res.json({ success: false, error: 'No theme list endpoint — pass ?key=<theme key from the editor URL>' });
   } catch (e) { res.json({ success: false, error: e.message }); }
 });
 
