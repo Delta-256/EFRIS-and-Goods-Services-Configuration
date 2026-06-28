@@ -2134,13 +2134,16 @@ app.post('/api/efris/dictionary-dump', async (req, res) => {
 // exact field shape (after the user sets one manually in Manager's UI).
 app.get('/api/manager/sb-sample', async (req, res) => {
   const { ep, tk } = mgrCreds(req);
-  const code = (req.query.code || '').trim();
-  if (!ep || !tk || !code) return res.status(400).json({ success: false, error: 'ep, tk, code required' });
+  if (!ep || !tk) return res.status(400).json({ success: false, error: 'ep, tk required' });
   try {
-    const resolved = await resolveManagerItemKey(ep, tk, code);
-    if (!resolved.key) return res.json({ success: false, error: 'item not found', reason: resolved.reason });
-    const g = await managerCall(ep, tk, 'GET', '/inventory-item-starting-balance-form/' + resolved.key, null);
-    res.json({ success: g.status === 200, status: g.status, key: resolved.key, form: g.data });
+    // Starting balances are their own records (keyed independently of the item),
+    // so read from the list rather than by item key.
+    const list = await managerCall(ep, tk, 'GET', '/inventory-item-starting-balances', null);
+    const arr = (list.data && (list.data.inventoryItemStartingBalances || list.data.InventoryItemStartingBalances || [])) || [];
+    if (!arr.length) return res.json({ success: false, error: 'No starting balances found', listKeys: Object.keys(list.data || {}) });
+    const key = arr[0].key || arr[0].Key;
+    const g = await managerCall(ep, tk, 'GET', '/inventory-item-starting-balance-form/' + key, null);
+    res.json({ success: g.status === 200, status: g.status, key, form: g.data });
   } catch (e) { res.json({ success: false, error: e.message }); }
 });
 
