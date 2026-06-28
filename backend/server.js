@@ -1330,10 +1330,9 @@ app.post('/api/manager/inventory-adjust', async (req, res) => {
     try {
       if (direction === 'in') {
         // Route by EFRIS stock-in type to the matching Manager document.
-        //   101 Import, 102 Local Purchase → Purchase Invoice (verified shape)
-        //   103 Manufacture/Assembly      → Production Order   (shape pending)
-        //   104 Opening Stock             → Purchase Invoice for now (safe);
-        //                                    true Starting Balance pending shape.
+        //   101 Import, 102 Local Purchase → Purchase Invoice
+        //   103 Manufacture/Assembly      → Production Order
+        //   104 Opening Stock             → Starting Balance
         const sit = String(b.stockInType || '').trim();
         if (sit === '103') {
           // Manufacture/Assembly → Production Order (finished item + qty). Bill of
@@ -1344,6 +1343,20 @@ app.post('/api/manager/inventory-adjust', async (req, res) => {
           console.log(`   production-order POST: HTTP ${r.status} item=${key} qty=${it.qty} body=${JSON.stringify(r.data||'').slice(0,120)}`);
           if (r.status >= 200 && r.status < 400) results.push({ item: it.itemCode || key, ok: true, path: 'production-order' });
           else results.push({ item: it.itemCode || key, ok: false, error: `Production order HTTP ${r.status}: ${JSON.stringify(r.data||'').slice(0,160)}` });
+          continue;
+        }
+        if (sit === '104') {
+          // Opening Stock → Starting Balance (confirmed shape). One per item.
+          const sb = {
+            InventoryItem: key,
+            HasQtyToOnHand: true,
+            QtyOnHandLines: [{ QtyOnHand: it.qty }],
+            AverageCost: parseFloat(it.unitPrice) || 0
+          };
+          const r = await managerCall(ep, accessToken, 'POST', '/inventory-item-starting-balance-form', sb);
+          console.log(`   starting-balance POST: HTTP ${r.status} item=${key} qty=${it.qty} body=${JSON.stringify(r.data||'').slice(0,120)}`);
+          if (r.status >= 200 && r.status < 400) results.push({ item: it.itemCode || key, ok: true, path: 'starting-balance' });
+          else results.push({ item: it.itemCode || key, ok: false, error: `Starting balance HTTP ${r.status}: ${JSON.stringify(r.data||'').slice(0,160)}` });
           continue;
         }
         // Purchase Invoice — standard, non-corrupting way to receive inventory.
