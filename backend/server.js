@@ -231,9 +231,10 @@ async function normalizeInvoice(ep, tk, key) {
       if (!it || it.error) { try { it = (await managerCall(ep, tk, 'GET', '/inventory-item-form/' + l.Item)).data; } catch (e) {} }
       if (it && !it.error) {
         itemName = it.Name || it.ItemName || itemName;
-        code = it.Code || it.code || '';
+        // Inventory items expose the code as ItemCode; non-inventory as Code.
+        code = it.ItemCode || it.itemCode || it.Code || it.code || '';
         unit = it.UnitName || unit;
-        console.log(`   Line item resolved: name="${itemName}" code="${code}" (Manager Code field)`);
+        console.log(`   Line item resolved: name="${itemName}" code="${code}" (EFRIS goodsCode)`);
       } else {
         console.log(`   Line item ${l.Item}: could not resolve from Manager (no code)`);
       }
