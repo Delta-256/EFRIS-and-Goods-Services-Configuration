@@ -981,10 +981,11 @@ app.get('/api/goods/manager-items', async (req, res) => {
   const { ep, tk } = mgrCreds(req);
   if (!ep || !tk) return res.status(400).json({ success: false, error: 'ep and tk required' });
   try {
-    const cols = '?fields=ItemCode&fields=ItemName&fields=SalePrice&fields=UnitName';
+    // No ?fields filter — in this Manager build that filter omits key/code, which
+    // breaks the import picker (needs key) and item matching (needs code).
     const [niR, invR] = await Promise.all([
-      managerCall(ep, tk, 'GET', '/non-inventory-items' + cols, null),
-      managerCall(ep, tk, 'GET', '/inventory-items' + cols, null)
+      managerCall(ep, tk, 'GET', '/non-inventory-items', null),
+      managerCall(ep, tk, 'GET', '/inventory-items', null)
     ]);
     const services = (niR.status === 200 && niR.data && (niR.data.nonInventoryItems || niR.data.NonInventoryItems)) || [];
     const goods    = (invR.status === 200 && invR.data && (invR.data.inventoryItems || invR.data.InventoryItems)) || [];
@@ -1307,7 +1308,7 @@ app.post('/api/manager/inventory-adjust', async (req, res) => {
   // Normalise to a list of {itemKey?, itemCode?, qty}
   let items = Array.isArray(b.items) ? b.items.slice()
             : (b.itemKey || b.itemCode) ? [{ itemKey: b.itemKey, itemCode: b.itemCode, qty: b.qty }] : [];
-  items = items.map(i => ({ itemKey: i.itemKey || '', itemCode: i.itemCode || i.code || '', qty: parseFloat(i.qty != null ? i.qty : i.quantity) || 0 }))
+  items = items.map(i => ({ itemKey: i.itemKey || '', itemCode: i.itemCode || i.code || '', qty: parseFloat(i.qty != null ? i.qty : i.quantity) || 0, unitPrice: parseFloat(i.unitPrice != null ? i.unitPrice : i.unitCost) || 0 }))
                .filter(i => i.qty > 0 && (i.itemKey || i.itemCode));
   if (!items.length) return res.json({ success: false, error: 'No items with a positive quantity to mirror.' });
 
@@ -1328,21 +1329,32 @@ app.post('/api/manager/inventory-adjust', async (req, res) => {
     if (!key) { results.push({ item: it.itemCode || it.itemKey, ok: false, error: 'No item key' }); continue; }
     try {
       if (direction === 'in') {
-        // SAFE read-modify-write: GET the item's starting-balance form, set the
-        // quantity field that actually exists in it, PUT it back. No blind POSTs.
-        const g = await managerCall(ep, accessToken, 'GET', '/inventory-item-starting-balance-form/' + key, null);
-        if (g.status !== 200 || !g.data || typeof g.data !== 'object') {
-          results.push({ item: it.itemCode || key, ok: false, error: `Could not read starting-balance form (HTTP ${g.status}). ${JSON.stringify(g.data||'').slice(0,120)}` });
+        // Route by EFRIS stock-in type to the matching Manager document.
+        //   101 Import, 102 Local Purchase → Purchase Invoice (verified shape)
+        //   103 Manufacture/Assembly      → Production Order   (shape pending)
+        //   104 Opening Stock             → Purchase Invoice for now (safe);
+        //                                    true Starting Balance pending shape.
+        const sit = String(b.stockInType || '').trim();
+        if (sit === '103') {
+          // Manufacture/Assembly → Production Order (finished item + qty). Bill of
+          // materials / labour live in Manager, so we create a minimal order that
+          // adds the produced quantity; the user can add the recipe in Manager.
+          const po = { Date: (String(date).slice(0, 10)) + 'T00:00:00', FinishedInventoryItem: key, Qty: it.qty, BillOfMaterials: [] };
+          const r = await managerCall(ep, accessToken, 'POST', '/production-order-form', po);
+          console.log(`   production-order POST: HTTP ${r.status} item=${key} qty=${it.qty} body=${JSON.stringify(r.data||'').slice(0,120)}`);
+          if (r.status >= 200 && r.status < 400) results.push({ item: it.itemCode || key, ok: true, path: 'production-order' });
+          else results.push({ item: it.itemCode || key, ok: false, error: `Production order HTTP ${r.status}: ${JSON.stringify(r.data||'').slice(0,160)}` });
           continue;
         }
-        const form = Object.assign({}, g.data);
-        // Set whichever quantity field the form uses (Qty / Quantity), and a value.
-        const qtyField = ('Qty' in form) ? 'Qty' : ('Quantity' in form) ? 'Quantity' : 'Qty';
-        form[qtyField] = it.qty;
-        const r = await managerCall(ep, accessToken, 'PUT', '/inventory-item-starting-balance-form/' + key, form);
-        console.log(`   SB PUT ${key}: HTTP ${r.status} qtyField=${qtyField} formKeys=${Object.keys(form).join(',')}`);
-        if (r.status >= 200 && r.status < 400) results.push({ item: it.itemCode || key, ok: true, path: 'starting-balance', qtyField, formKeys: Object.keys(form) });
-        else results.push({ item: it.itemCode || key, ok: false, error: `Starting-balance PUT HTTP ${r.status}: ${JSON.stringify(r.data||'').slice(0,160)}`, formKeys: Object.keys(form) });
+        // Purchase Invoice — standard, non-corrupting way to receive inventory.
+        const payload = {
+          IssueDate: (String(date).slice(0, 10)) + 'T00:00:00',
+          Lines: [{ Item: key, Qty: it.qty, PurchaseUnitPrice: parseFloat(it.unitPrice) || 0 }]
+        };
+        const r = await managerCall(ep, accessToken, 'POST', '/purchase-invoice-form', payload);
+        console.log(`   purchase-invoice POST (type ${sit}): HTTP ${r.status} item=${key} qty=${it.qty} body=${JSON.stringify(r.data||'').slice(0,120)}`);
+        if (r.status >= 200 && r.status < 400) results.push({ item: it.itemCode || key, ok: true, path: 'purchase-invoice' });
+        else results.push({ item: it.itemCode || key, ok: false, error: `Purchase invoice HTTP ${r.status}: ${JSON.stringify(r.data||'').slice(0,160)}` });
       } else {
         // decrease → write-off document
         let r = await managerCall(ep, accessToken, 'POST', '/inventory-write-off-form', { Date: date, Description: description, Lines: [{ Item: key, Qty: it.qty }] });
@@ -2116,6 +2128,85 @@ app.post('/api/efris/dictionary-dump', async (req, res) => {
     }
     res.json({ success: true, keys: Object.keys(dict), summary });
   } catch (e) { res.json({ success: false, error: e.message }); }
+});
+
+// Diagnostic: read an inventory item's starting-balance form so we learn the
+// exact field shape (after the user sets one manually in Manager's UI).
+app.get('/api/manager/sb-sample', async (req, res) => {
+  const { ep, tk } = mgrCreds(req);
+  if (!ep || !tk) return res.status(400).json({ success: false, error: 'ep, tk required' });
+  try {
+    // Starting balances are their own records (keyed independently of the item),
+    // so read from the list rather than by item key.
+    const list = await managerCall(ep, tk, 'GET', '/inventory-item-starting-balances', null);
+    const arr = (list.data && (list.data.inventoryItemStartingBalances || list.data.InventoryItemStartingBalances || [])) || [];
+    if (!arr.length) return res.json({ success: false, error: 'No starting balances found', listKeys: Object.keys(list.data || {}) });
+    const key = arr[0].key || arr[0].Key;
+    const g = await managerCall(ep, tk, 'GET', '/inventory-item-starting-balance-form/' + key, null);
+    res.json({ success: g.status === 200, status: g.status, key, form: g.data });
+  } catch (e) { res.json({ success: false, error: e.message }); }
+});
+
+// Diagnostic: read the most recent production order's form (after the user
+// creates one manually) so we learn the exact shape to mirror Manufacture/Assembly.
+app.get('/api/manager/po-sample', async (req, res) => {
+  const { ep, tk } = mgrCreds(req);
+  if (!ep || !tk) return res.status(400).json({ success: false, error: 'ep, tk required' });
+  try {
+    const list = await managerCall(ep, tk, 'GET', '/production-orders', null);
+    const arr = (list.data && (list.data.productionOrders || list.data.ProductionOrders || [])) || [];
+    if (!arr.length) return res.json({ success: false, error: 'No production orders found to sample', listKeys: Object.keys(list.data || {}) });
+    const key = arr[0].key || arr[0].Key;
+    const f = await managerCall(ep, tk, 'GET', '/production-order-form/' + key, null);
+    res.json({ success: f.status === 200, status: f.status, key, form: f.data });
+  } catch (e) { res.json({ success: false, error: e.message }); }
+});
+
+// Diagnostic: read the most recent purchase invoice's form so we learn the
+// exact payload shape to replicate (Lines field names, Account, etc.).
+app.get('/api/manager/pi-sample', async (req, res) => {
+  const { ep, tk } = mgrCreds(req);
+  if (!ep || !tk) return res.status(400).json({ success: false, error: 'ep, tk required' });
+  try {
+    const list = await managerCall(ep, tk, 'GET', '/purchase-invoices', null);
+    const arr = (list.data && (list.data.purchaseInvoices || list.data.PurchaseInvoices || [])) || [];
+    if (!arr.length) return res.json({ success: false, error: 'No purchase invoices found to sample', listKeys: Object.keys(list.data || {}) });
+    const key = arr[0].key || arr[0].Key;
+    const f = await managerCall(ep, tk, 'GET', '/purchase-invoice-form/' + key, null);
+    res.json({ success: f.status === 200, status: f.status, key, form: f.data });
+  } catch (e) { res.json({ success: false, error: e.message }); }
+});
+
+// Force-clean a broken inventory item (e.g. one whose form 404s because a bad
+// starting-balance write corrupted it). Resolves the key by code, then deletes
+// its starting balance and the item itself, reporting each step.
+app.post('/api/manager/cleanup-item', async (req, res) => {
+  const { managerEndpoint, accessToken, code } = req.body || {};
+  const ep = normEp(managerEndpoint || ''), tk = accessToken;
+  if (!ep || !tk || !code) return res.status(400).json({ success: false, error: 'managerEndpoint, accessToken and code are required' });
+  const want = String(code).trim().toLowerCase();
+  const codeOf = i => String(i.code || i.Code || i.ItemCode || i.itemCode || '').trim().toLowerCase();
+  const steps = [];
+  try {
+    // find the key in inventory + non-inventory lists
+    let key = null, base = null;
+    for (const [path, prop, fb] of [['/inventory-items', 'inventoryItems', '/inventory-item-form'], ['/non-inventory-items', 'nonInventoryItems', '/non-inventory-item-form']]) {
+      try {
+        const r = await managerCall(ep, tk, 'GET', path, null);
+        const arr = (r.data && (r.data[prop] || [])) || [];
+        const hit = arr.find(i => codeOf(i) === want);
+        if (hit) { key = hit.key || hit.Key; base = fb; steps.push(`found in ${path} → key ${key}`); break; }
+      } catch (e) { steps.push(`${path}: ${e.message}`); }
+    }
+    if (!key) return res.json({ success: false, error: 'Item not found in any Manager list', steps });
+    // 1) delete starting balance (the likely corrupter)
+    try { const r = await managerCall(ep, tk, 'DELETE', '/inventory-item-starting-balance-form/' + key, null); steps.push(`DELETE starting-balance → HTTP ${r.status}`); } catch (e) { steps.push('starting-balance del err: ' + e.message); }
+    // 2) delete the item itself
+    let delStatus = null;
+    try { const r = await managerCall(ep, tk, 'DELETE', base + '/' + key, null); delStatus = r.status; steps.push(`DELETE ${base} → HTTP ${r.status}`); } catch (e) { steps.push('item del err: ' + e.message); }
+    const ok = delStatus != null && delStatus >= 200 && delStatus < 400;
+    res.json({ success: ok, key, steps });
+  } catch (e) { res.status(500).json({ success: false, error: e.message, steps }); }
 });
 
 // Diagnostic: find which inventory-adjustment form endpoints exist in this

@@ -4324,8 +4324,8 @@ async function stkSubmitIn(){
     }
     const d=await r.json();
     if(d.success){
-      ht('stkInResult','<div class="st ss">&#10003; Stock recorded in EFRIS'+(d.partialErrors&&d.partialErrors.length?' ('+d.partialErrors.length+' item error(s))':'')+'</div>');
-      mirrorStockToManager('in',items,gvi('stkDate'),'stkInResult');
+      ht('stkInResult','<div class="st ss">&#10003; Stock recorded in EFRIS'+(d.partialErrors&&d.partialErrors.length?' ('+d.partialErrors.length+' item error(s))':'')+'</div>'
+        +'<div class="al ai" style="font-size:11px;margin-top:4px;">To also update Manager’s inventory quantity, click <strong>📦 Submit Stock-in to Manager</strong> above.</div>');
     }
     else ht('stkInResult','<div class="st se">&#10005; '+esc(d.error||'Failed')+(d.partialErrors&&d.partialErrors.length?'<br>'+d.partialErrors.map(e=>esc(e.itemCode+': '+e.returnMessage)).join('<br>'):'')+'</div>');
   }catch(e){ht('stkInResult','<div class="st se">'+esc(e.message)+'</div>');}
@@ -4339,10 +4339,10 @@ async function stkSubmitIn(){
 function stkSubmitInManager(){
   const items=_stkInItems.filter(i=>i.itemCode.trim());
   if(!items.length){ alert('Add at least one item with a code'); return; }
-  mirrorStockToManager('in',items,gvi('stkDate'),'stkInResult');
+  mirrorStockToManager('in',items,gvi('stkDate'),'stkInResult',($('stkInType')||{}).value||'104');
 }
 let _lastStockMirror=null;
-async function mirrorStockToManager(direction,items,date,resultId){
+async function mirrorStockToManager(direction,items,date,resultId,stockInType){
   const ep=CFG.managerEndpoint||MGR_EP, tk=CFG.accessToken||MGR_TK;
   if(!ep||!tk){ const el=$(resultId); if(el) el.innerHTML+='<div class="st se">Manager not configured.</div>'; return; }
   // Prefer the Manager item key we already captured at sync time (avoids any
@@ -4350,16 +4350,16 @@ async function mirrorStockToManager(direction,items,date,resultId){
   const _gi=(typeof gItems!=='undefined'&&gItems)?gItems:[];
   const payloadItems=items.map(i=>{
     const g=_gi.find(x=>(x.code||'').toLowerCase()===(i.itemCode||'').toLowerCase());
-    return {itemCode:i.itemCode,quantity:i.quantity,itemKey:(g&&g.managerId)||''};
+    return {itemCode:i.itemCode,quantity:i.quantity,unitPrice:i.unitPrice||i.unitCost||0,itemKey:(g&&g.managerId)||''};
   });
-  _lastStockMirror={direction,items,date,resultId};
+  _lastStockMirror={direction,items,date,resultId,stockInType};
   const append=h=>{ const el=$(resultId); if(el) el.innerHTML+=h; };
   // Clear any previous mirror line for this result area before re-running
   const prev=$(resultId+'_mgr'); if(prev) prev.outerHTML='';
   append('<div class="st si" id="'+resultId+'_mgr"><span class="sp">⏳</span> Updating Manager inventory…</div>');
   const retryBtn='<button class="btn bo bsm" style="margin-top:4px;" onclick="retryStockMirror()">&#128230; Submit stock-in to Manager</button>';
   try{
-    const r=await fetch(RELAY+'/api/manager/inventory-adjust',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({managerEndpoint:ep,accessToken:tk,direction,date,items:payloadItems})});
+    const r=await fetch(RELAY+'/api/manager/inventory-adjust',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({managerEndpoint:ep,accessToken:tk,direction,date,stockInType:stockInType||'',items:payloadItems})});
     const d=await r.json();
     const mg=$(resultId+'_mgr');
     if(d.success&&d.mirrored===d.total) mg.outerHTML='<div class="st ss">&#10003; Manager inventory updated ('+d.mirrored+' item'+(d.mirrored>1?'s':'')+')</div>';
@@ -4372,7 +4372,7 @@ async function mirrorStockToManager(direction,items,date,resultId){
 function retryStockMirror(){
   if(!_lastStockMirror){ alert('Nothing to submit — record a stock-in/adjustment first.'); return; }
   const m=_lastStockMirror;
-  mirrorStockToManager(m.direction,m.items,m.date,m.resultId);
+  mirrorStockToManager(m.direction,m.items,m.date,m.resultId,m.stockInType);
 }
 async function stkSubmitAdj(){
   const items=_stkAdjItems.filter(i=>i.itemCode.trim());
@@ -4389,7 +4389,6 @@ async function stkSubmitAdj(){
     const d=await r.json();
     if(d.success){
       ht('stkAdjResult','<div class="st ss">&#10003; Stock adjustment recorded in EFRIS</div>');
-      mirrorStockToManager('out',items,gvi('stkAdjDate'),'stkAdjResult');
     }
     else ht('stkAdjResult','<div class="st se">&#10005; '+esc(d.error||'Failed')+'</div>');
   }catch(e){ht('stkAdjResult','<div class="st se">'+esc(e.message)+'</div>');}
