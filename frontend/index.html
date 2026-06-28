@@ -2730,13 +2730,14 @@ async function doCreditNote(){
     ht('rFDN','<span style="color:#c62828;">&#8617; CREDIT NOTE</span> '+esc(d1.fdn||'—'));
     tx('rAF',d1.antifakeCode||'—');
     ht('rQR',d1.qrCode?'<img src="'+esc(d1.qrCode)+'" alt="QR Code" style="width:100px;height:100px;margin-top:4px;" onerror="this.style.display=\'none\'"/>':'');
+    ht('rVerifyLink',d1.validationUrl?'<a href="'+esc(d1.validationUrl)+'" target="_blank" rel="noopener" style="font-size:11px;color:#1565c0;">&#128279; Verify Credit Note on URA EFRIS Portal</a>':'');
     // Step 2: Create credit note record in Manager
     const ep=CFG.managerEndpoint||MGR_EP, tk=CFG.accessToken||MGR_TK;
     let cnKey=null;
     if(ep&&tk&&DKEY){
       try{
         const cr=await fetch(RELAY+'/api/manager/create-credit-note',{method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({managerEndpoint:ep,accessToken:tk,originalKey:DKEY,reason,efrisFdn:d1.fdn,efrisInvoiceId:d1.invoiceId||''})});
+          body:JSON.stringify({managerEndpoint:ep,accessToken:tk,originalKey:DKEY,reason,efrisFdn:d1.fdn,efrisInvoiceId:d1.invoiceId||'',efrisAntifake:d1.antifakeCode||'',efrisQr:(d1.validationUrl||d1.qrCode||''),efrisSubDate:(d1.issuedDate||'').slice(0,10)})});
         const cd=await cr.json();
         cnKey=cd.key;
         if(cd.success) ht('mgrSave','<div class="st ss">&#10003; Credit note created in Manager (ref: CN-'+esc(INV.Reference||'')+')</div>');

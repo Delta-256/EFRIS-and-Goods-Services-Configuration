@@ -1835,19 +1835,28 @@ app.post('/api/efris/credit-note', rateLimit(30), async (req, res) => {
     const t108 = await efrisCall(eu, efrisEnvEnc('T108', t108data, config.tin, config.deviceNo, session.aesKey, session.privatePem));
     const rc = t108.data && t108.data.returnStateInfo ? t108.data.returnStateInfo.returnCode : null;
     const rm = t108.data && t108.data.returnStateInfo ? t108.data.returnStateInfo.returnMessage : '';
-    let fdn = null, cnRef = null;
+    let fdn = null, cnRef = null, antifakeCode = null, invoiceId = '', validationUrl = null;
     if (t108.data && t108.data.data && t108.data.data.content) {
       try {
         const s = aesDecryptStr(t108.data.data.content, session.aesKey);
         const d = JSON.parse(s);
-        fdn = d.invoiceNo || d.fdn || d.fiscalDocumentNumber || null;
+        const bi = d.basicInformation || {};
+        fdn = d.invoiceNo || d.fdn || d.fiscalDocumentNumber || bi.invoiceNo || null;
+        antifakeCode = d.antiFakeCode || d.antifakeCode || bi.antifakeCode || bi.antiFakeCode || null;
+        invoiceId = d.invoiceId || d.invoiceID || bi.invoiceId || '';
         cnRef = d.referenceNo || referenceNo || null;
+        const efrisPortal = config.mode === 'production'
+          ? 'https://efris.ura.go.ug/site_mobile/#/invoiceValidation'
+          : 'https://efristest.ura.go.ug/site_new/#/invoiceValidation';
+        validationUrl = (fdn && antifakeCode)
+          ? `${efrisPortal}?invoiceNo=${encodeURIComponent(fdn)}&antiFakeCode=${encodeURIComponent(antifakeCode)}`
+          : null;
         console.log('   T108 credit note:', JSON.stringify(d));
       } catch(e) { console.log('   T108 parse error:', e.message); }
     }
     const ok = rc === '00' || !!fdn;
     res.json(ok
-      ? { success: true, fdn, referenceNo: cnRef, returnCode: rc, returnMessage: rm }
+      ? { success: true, fdn, referenceNo: cnRef, antifakeCode, invoiceId, validationUrl, qrCode: validationUrl, deviceNo: config.deviceNo, returnCode: rc, returnMessage: rm }
       : { success: false, error: 'URA ' + rc + ': ' + rm, returnCode: rc });
   } catch(e) {
     res.status(500).json({ success: false, error: e.message });
@@ -2089,9 +2098,28 @@ app.post('/api/efris/save-to-manager', async (req, res) => {
 
 // Create a credit note in Manager linked to the original invoice/receipt
 app.post('/api/manager/create-credit-note', async (req, res) => {
-  const { managerEndpoint, accessToken, originalKey, originalDocType, reason, efrisFdn, efrisInvoiceId } = req.body || {};
+  const { managerEndpoint, accessToken, originalKey, originalDocType, reason, efrisFdn, efrisInvoiceId, efrisAntifake, efrisQr, efrisSubDate } = req.body || {};
   if (!managerEndpoint || !accessToken || !originalKey) return res.status(400).json({ success: false, error: 'Missing required fields' });
   const ep = normEp(managerEndpoint);
+  // Overwrite a credit-note form's EFRIS custom fields with the CREDIT NOTE's own
+  // values (so it doesn't inherit the original invoice's FDN/QR when cloned).
+  const applyCnEfris = (form, cfMeta) => {
+    const set = (names, val) => {
+      if (val == null || val === '') return;
+      const mn = Object.keys(cfMeta.byName || {}).find(n => names.some(l => n.toLowerCase().includes(l.toLowerCase())));
+      if (!mn) return;
+      const k = cfMeta.byName[mn];
+      if (!form.CustomFields2) form.CustomFields2 = { Strings: {} };
+      if (!form.CustomFields2.Strings) form.CustomFields2.Strings = {};
+      form.CustomFields2.Strings[k] = String(val);
+    };
+    set(['Fiscal Document', 'FDN'], efrisFdn);
+    set(['Verification'], efrisAntifake);
+    set(['QR Code', 'QR'], efrisQr);
+    set(['Invoice ID', 'UGX Inv'], efrisInvoiceId);
+    set(['Submission Date'], efrisSubDate);
+    set(['Status'], 'Credit Note');
+  };
 
   // First read the original document to get its lines and details
   let origForm = null, origFormBase = '/sales-invoice-form';
@@ -2146,17 +2174,7 @@ app.post('/api/manager/create-credit-note', async (req, res) => {
         const getCN = await managerCall(ep, accessToken, 'GET', cnFormBase + '/' + newKey, null);
         if (getCN.status === 200 && getCN.data) {
           const cnForm = getCN.data;
-          const setCF = (names, val) => {
-            const matchedName = Object.keys(cfMeta.byName).find(n => names.some(label => n.toLowerCase().includes(label.toLowerCase())));
-            if (matchedName) {
-              const cfKey = cfMeta.byName[matchedName];
-              if (!cnForm.CustomFields2) cnForm.CustomFields2 = { Strings: {} };
-              if (!cnForm.CustomFields2.Strings) cnForm.CustomFields2.Strings = {};
-              cnForm.CustomFields2.Strings[cfKey] = String(val);
-            }
-          };
-          setCF(['Fiscal Document', 'FDN', 'EFRIS FDN'], efrisFdn);
-          setCF(['Status', 'EFRIS Status'], 'Credit Note');
+          applyCnEfris(cnForm, cfMeta);
           await managerCall(ep, accessToken, 'POST', cnFormBase + '/' + newKey, cnForm);
         }
       } catch(_) {}
@@ -2175,6 +2193,8 @@ app.post('/api/manager/create-credit-note', async (req, res) => {
     if (fallbackForm.Lines) {
       fallbackForm.Lines = fallbackForm.Lines.map(l => ({ ...l, Qty: -(parseFloat(l.Qty) || 1), UnitPrice: parseFloat(l.UnitPrice) || 0 }));
     }
+    // Overwrite the cloned (original's) EFRIS custom fields with the credit note's.
+    try { const cfMeta = await mgrTextCustomFields(ep, accessToken); applyCnEfris(fallbackForm, cfMeta); } catch (_) {}
     const fallR = await managerCall(ep, accessToken, 'POST', origFormBase, fallbackForm);
     let newKey = null;
     if (fallR.data && fallR.data.key) newKey = fallR.data.key;
