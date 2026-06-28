@@ -277,6 +277,7 @@
     <div id="subPicker" class="card hidden">
       <div class="ct">&#128203; Select an Invoice to Submit</div>
       <p style="font-size:12px;color:var(--gray);margin-bottom:8px;">Tap an invoice below to load it, or create a new receipt directly.</p>
+      <div class="al ai" style="font-size:11px;margin-bottom:8px;">&#128161; <strong>Issuing a credit note?</strong> Just select the original invoice/receipt here. If it was already submitted to EFRIS, it opens with an <strong>&#8617; Issue Credit Note</strong> button.</div>
       <button onclick="showCreate()" class="btn bp" style="width:100%;margin-bottom:8px;">+ New Receipt</button>
       <div style="display:flex;gap:6px;margin-bottom:6px;">
         <button onclick="loadList($('pickSearch2')?$('pickSearch2').value:'')" style="flex:1;padding:8px;border:1px solid var(--bdr);background:white;border-radius:6px;cursor:pointer;font-weight:600;color:var(--gd);">&#128260; Refresh</button>
@@ -935,6 +936,13 @@
       <div class="gs"><div class="gn">6</div><div class="gb">
         <h4>Print the professional receipt (optional)</h4>
         <p>After submission, click <strong>Print Professional Receipt / PDF</strong>. A clean, branded A4 receipt opens in a new tab with the QR code already embedded. Use your browser's Print → Save as PDF.</p>
+      </div></div>
+
+      <div class="gs"><div class="gn">7</div><div class="gb">
+        <h4>Issue a credit note (now or later)</h4>
+        <p>To reverse/cancel a submitted document, you issue a credit note against it on URA EFRIS.<br>
+        <strong>Right after submitting:</strong> click <strong>↩ Credit Note</strong> on the result card.<br>
+        <strong>Later (anytime):</strong> go to the <strong>Submit</strong> tab and <strong>select the original invoice/receipt</strong> from the list. If it was already submitted, it loads showing <em>“Already submitted — FDN …”</em> with an <strong>↩ Issue Credit Note</strong> button. Pick the reason, confirm the line(s), and submit — the credit note gets its own FDN/QR and is recorded in Manager's <strong>Credit Notes</strong> tab.</p>
       </div></div>
     </div>
 
@@ -1660,7 +1668,7 @@ window.__invList=[];
 let _invSearchT=null, _onlyUnsubmitted=false;
 // Debounced server-side search — called as the user types in the picker search box.
 function invSearch(v){ clearTimeout(_invSearchT); _invSearchT=setTimeout(()=>loadList(v),350); }
-function toggleUnsubmitted(cb){ _onlyUnsubmitted=!!cb.checked; loadList(($('pickSearch2')&&$('pickSearch2').value)||($('pickSearch')&&$('pickSearch').value)||''); }
+function toggleUnsubmitted(cb){ _onlyUnsubmitted=!!cb.checked; window.__submittedRefs=null; /* refresh so newly-submitted docs are excluded */ loadList(($('pickSearch2')&&$('pickSearch2').value)||($('pickSearch')&&$('pickSearch').value)||''); }
 async function loadList(term){
   term=(term||'').trim();
   const ep=CFG.managerEndpoint||MGR_EP, tk=CFG.accessToken||MGR_TK;
@@ -2730,13 +2738,14 @@ async function doCreditNote(){
     ht('rFDN','<span style="color:#c62828;">&#8617; CREDIT NOTE</span> '+esc(d1.fdn||'—'));
     tx('rAF',d1.antifakeCode||'—');
     ht('rQR',d1.qrCode?'<img src="'+esc(d1.qrCode)+'" alt="QR Code" style="width:100px;height:100px;margin-top:4px;" onerror="this.style.display=\'none\'"/>':'');
+    ht('rVerifyLink',d1.validationUrl?'<a href="'+esc(d1.validationUrl)+'" target="_blank" rel="noopener" style="font-size:11px;color:#1565c0;">&#128279; Verify Credit Note on URA EFRIS Portal</a>':'');
     // Step 2: Create credit note record in Manager
     const ep=CFG.managerEndpoint||MGR_EP, tk=CFG.accessToken||MGR_TK;
     let cnKey=null;
     if(ep&&tk&&DKEY){
       try{
         const cr=await fetch(RELAY+'/api/manager/create-credit-note',{method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({managerEndpoint:ep,accessToken:tk,originalKey:DKEY,reason,efrisFdn:d1.fdn,efrisInvoiceId:d1.invoiceId||''})});
+          body:JSON.stringify({managerEndpoint:ep,accessToken:tk,originalKey:DKEY,reason,efrisFdn:d1.fdn,efrisInvoiceId:d1.invoiceId||'',efrisAntifake:d1.antifakeCode||'',efrisQr:(d1.validationUrl||d1.qrCode||''),efrisSubDate:(d1.issuedDate||'').slice(0,10)})});
         const cd=await cr.json();
         cnKey=cd.key;
         if(cd.success) ht('mgrSave','<div class="st ss">&#10003; Credit note created in Manager (ref: CN-'+esc(INV.Reference||'')+')</div>');
