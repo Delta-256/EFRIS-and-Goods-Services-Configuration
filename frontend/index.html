@@ -2097,7 +2097,9 @@ async function wkSubmit(){
     ht('wkRTitle','✓ '+_dl+' issued — submitted to URA EFRIS');
     tx('wkRFDN',d.fdn||'—'); tx('wkRAF',d.antifakeCode||'—');
     ht('wkRVerify',d.validationUrl?'<a href="'+esc(d.validationUrl)+'" target="_blank" rel="noopener" style="font-size:11px;color:#1565c0;">🔗 Verify on URA EFRIS Portal</a>':'');
-    wkPrintAfterSubmit();
+    // Submission already succeeded — never let a print-preview hiccup surface as
+    // a submit error.
+    try{ wkPrintAfterSubmit(); }catch(pe){ console.warn('Receipt preview error:', pe); }
   }catch(e){ alert('Error: '+e.message); }
   if(btn){ btn.disabled=false; btn.textContent='📤 Submit to EFRIS & Print'; }
 }
@@ -2192,42 +2194,28 @@ function _openReceiptWith(inv, efris){
 // same-origin iframe and call print() on it — no new tab, no navigating away,
 // works the same on the cloud edition and inside Manager Desktop. (The receipt
 // page hides its on-screen controls under @media print, so output is clean.)
+// Show the receipt as an in-page PREVIEW (visible iframe in a modal) so the user
+// can review/adjust (the receipt page has colour, title and code-visibility
+// controls) and then print — instead of redirecting or auto-printing a blank,
+// unsized frame.
 function openReceiptUrl(url){
-  // Remove any previous print frame
-  const old=$('printFrame'); if(old){ try{ old.remove(); }catch(_){} }
-  const f=document.createElement('iframe');
-  f.id='printFrame';
-  // Off-screen but with REAL A4-ish dimensions — a 0x0/hidden iframe has no
-  // layout and prints a blank page. contentWindow.print() prints the full
-  // document regardless of this element's height.
-  f.style.cssText='position:fixed;left:-10000px;top:0;width:794px;height:1123px;border:0;background:#fff;';
-  let printed=false;
-  const fire=()=>{
-    if(printed) return; printed=true;
-    try{
-      const w=f.contentWindow;
-      w.focus();
-      try{ w.addEventListener('afterprint',()=>{ setTimeout(()=>{ try{ f.remove(); }catch(_){} },500); }); }catch(_){}
-      w.print();
-      setTimeout(()=>{ try{ if($('printFrame')) f.remove(); }catch(_){} }, 60000);
-    }catch(e){
-      try{ f.remove(); }catch(_){}
-      _printFallbackLink(url);
-    }
-  };
-  // Wait until the receipt has actually rendered content before printing —
-  // fixes the "blank page / needs a second click" timing.
-  f.onload=()=>{
-    let tries=0;
-    const ready=()=>{
-      tries++; let ok=false;
-      try{ const doc=f.contentDocument||f.contentWindow.document; const s=doc.getElementById('sheet')||doc.body; ok=!!(s && (s.innerText||'').replace(/\s/g,'').length>20); }catch(_){ ok=true; }
-      if(ok||tries>30){ fire(); } else { setTimeout(ready,100); }
-    };
-    setTimeout(ready,120);
-  };
-  document.body.appendChild(f);
-  f.src=url;
+  const old=$('printOverlay'); if(old){ try{ old.remove(); }catch(_){} }
+  const ov=document.createElement('div');
+  ov.id='printOverlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:4000;display:flex;flex-direction:column;';
+  ov.innerHTML=
+    '<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:#2e7d32;color:#fff;">'
+    +'<strong style="flex:1;font-size:13px;">Receipt preview — adjust if needed, then print</strong>'
+    +'<button onclick="printReceiptFrame()" class="btn bsm" style="background:#fff;color:#2e7d32;font-weight:700;">&#128424; Print</button>'
+    +'<button onclick="var o=document.getElementById(\'printOverlay\');if(o)o.remove();" class="btn bsm" style="background:transparent;color:#fff;border:1px solid #fff;">&#10005; Close</button>'
+    +'</div>'
+    +'<iframe id="printFrame" src="'+esc(url)+'" style="flex:1;width:100%;border:0;background:#fff;"></iframe>';
+  document.body.appendChild(ov);
+}
+function printReceiptFrame(){
+  const f=$('printFrame'); if(!f){ return; }
+  try{ f.contentWindow.focus(); f.contentWindow.print(); }
+  catch(e){ try{ window.open(f.src,'_blank'); }catch(_){} }
 }
 function _printFallbackLink(url){
   let box=$('printFallback');
