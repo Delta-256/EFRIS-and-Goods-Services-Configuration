@@ -2961,10 +2961,17 @@ function gOnComChange(){
 }
 
 function gBuildDetailsSummary(){
-  const el=$('gComSummary');
+  const el=$('gComSummary'); if(!el) return;
+  // gCOM may be null for an imported item with no commodity code yet — don't crash.
+  if(!gCOM){
+    el.innerHTML='<span class="g-sel-name" style="color:var(--gray);">No commodity category yet — use “Choose / change EFRIS commodity category”.</span>';
+    const g=$('gFldGrouping'); if(g) g.value='';
+    const c=$('gFldComCode'); if(c) c.value='';
+    return;
+  }
   el.innerHTML='<span class="g-sel-code">('+esc(gCOM.k)+')</span><span class="g-sel-name">'+esc(gCOM.n)+'</span>';
-  $('gFldGrouping').value=(gSEG?gSEG.n:'')+' >> '+(gFAM?gFAM.n:'')+' >> '+(gCLS?gCLS.n:'');
-  $('gFldComCode').value=gCOM.k;
+  const g=$('gFldGrouping'); if(g) g.value=(gSEG?gSEG.n:'')+' >> '+(gFAM?gFAM.n:'')+' >> '+(gCLS?gCLS.n:'');
+  const c=$('gFldComCode'); if(c) c.value=gCOM.k;
 }
 
 function gUomInput(v){
@@ -3602,9 +3609,17 @@ async function gImportManagerItem(idx){
     (x.code&&i.code&&x.code.toLowerCase()===i.code.toLowerCase())||
     (x.name&&i.name&&x.name.toLowerCase()===i.name.toLowerCase())
   );
-  const alreadyConfigured = !!(existingItem&&existingItem.comCode);
-  if(alreadyConfigured && existingItem){
-    if(existingItem.comCode) gCOM={k:existingItem.comCode, n:existingItem.comName||''};
+  // Prefer the EFRIS commodity code/path stored in Manager (from a prior sync);
+  // fall back to a locally-configured copy. Either way, a configured item won't
+  // need the category re-picked — only items lacking a code do.
+  let comFromMgr = detail && detail.comCode ? detail.comCode : '';
+  let pathFromMgr = detail && detail.catPath ? detail.catPath : '';
+  const alreadyConfigured = !!(comFromMgr || (existingItem&&existingItem.comCode));
+  if(comFromMgr){
+    gCOM={k:comFromMgr, n:''};
+    if(pathFromMgr){ const p=pathFromMgr.split('>>').map(s=>s.trim()); gSEG={k:'',n:p[0]||''}; gFAM={k:'',n:p[1]||''}; gCLS={k:'',n:p[2]||''}; }
+  } else if(existingItem && existingItem.comCode){
+    gCOM={k:existingItem.comCode, n:existingItem.comName||''};
     if(existingItem.segCode) gSEG={k:existingItem.segCode, n:existingItem.segment||''};
     if(existingItem.famCode) gFAM={k:existingItem.famCode, n:existingItem.family||''};
     if(existingItem.clsCode) gCLS={k:existingItem.clsCode, n:existingItem.cls||''};
@@ -3613,27 +3628,35 @@ async function gImportManagerItem(idx){
   if(CFG.efrisEnabled===false || alreadyConfigured){ gGoStep(5); }
   else { gGoStep(5); } // Go to step 5 regardless; commodity wizard is accessible via button
   setTimeout(()=>{
+    // Fill from the list item first (always present), then enrich from detail.
     const code=(detail&&detail.code)||i.code||'';
     const name=(detail&&detail.name)||i.name||'';
     const unitName=(detail&&detail.unitName)||i.unitName||'';
-    const price=(detail&&detail.hasSalesUnitPrice)?detail.salesUnitPrice:0;
-    const remarks=(detail&&(detail.defaultLineDescription||detail.description))||'';
+    // Price: prefer detail's sales price, else the list item's price (services
+    // don't expose hasSalesUnitPrice, so don't gate on it).
+    let price=0;
+    if(detail&&detail.salesUnitPrice) price=detail.salesUnitPrice;
+    if(!price&&(i.price||i.salesUnitPrice)) price=i.price||i.salesUnitPrice;
+    const remarks=(detail&&(detail.defaultLineDescription||detail.description))||name||'';
     sv('gFldCode', code);
     sv('gFldName', name);
     sv('gFldUom',  unitName);
-    setTimeout(()=>gAutoEfrisUom(unitName||''),100);
     if(price>0) sv('gFldPrice', String(price));
+    // Currency is required — default to UGX if Manager didn't give one.
+    const curEl=$('gFldCur'); if(curEl && !curEl.value){ curEl.value=(detail&&detail.currency)||'UGX'; }
     if(remarks){ const rEl=$('gFldRemarks'); if(rEl) rEl.value=remarks; }
-    const typeEl=$('gFldType');
-    if(typeEl) typeEl.value=i.type==='Goods'?'Goods':'Service';
+    const typeEl=$('gFldType'); if(typeEl) typeEl.value=i.type==='Goods'?'Goods':'Service';
     if(detail&&detail.division&&$('gFldDivision')) $('gFldDivision').value=detail.division;
     if($('gFldAutoSalesDivision')) $('gFldAutoSalesDivision').checked=!!(detail&&detail.salesDivision&&detail.salesDivision===detail.division);
     if(detail&&detail.costMethod!=null&&$('gFldCostMethod')) $('gFldCostMethod').value=String(detail.costMethod);
     if(detail&&detail.whenSold&&$('gFldWhenSold')) $('gFldWhenSold').value=detail.whenSold;
     if(detail&&detail.whenPurchased&&$('gFldWhenPurchased')) $('gFldWhenPurchased').value=detail.whenPurchased;
     gOnTypeChange();
+    if(unitName) gAutoEfrisUom(unitName);
+    // Make sure the Sync / Register buttons are visible for this imported item.
+    const abc=$('gActionBtnsCard'); if(abc) abc.style.display='';
     window._importedManagerKey=i.key;
-  },50);
+  },60);
   const priceNote=detail&&detail.hasSalesUnitPrice?' · Price: '+(detail.salesUnitPrice||0).toLocaleString():'';
   const efrisOn=CFG.efrisEnabled!==false;
   const nextStep=(efrisOn&&!alreadyConfigured)
