@@ -733,8 +733,11 @@ function buildT109(invoice, cfg) {
     buyerLegalName = invoice.CustomerName || 'Foreign Visitor';
     buyerBusinessName = invoice.CustomerName || ''; buyerAddress = invoice.CustomerAddress || '';
   } else {
-    // B2C default — walk-in local customer
-    buyerType = '1'; buyerTin = ''; buyerPassportNum = '';
+    // B2C default — walk-in local customer. Some consumers do have a TIN; when one
+    // is supplied, treat as a taxpayer (buyerType 0) so EFRIS records it.
+    if (hasTin) { buyerType = '0'; buyerTin = String(invoice.CustomerTIN || ''); }
+    else { buyerType = '1'; buyerTin = ''; }
+    buyerPassportNum = '';
     buyerCitizenship = ''; buyerLegalName = invoice.CustomerName || 'Walk-in Customer';
     buyerBusinessName = invoice.CustomerName || ''; buyerAddress = '';
   }
@@ -1225,6 +1228,11 @@ function efrisFieldSpecs(P) {
     { create: 'Invoice ID',       match: ['invoice id'],                               placement: DOC },
     { create: 'Status',           match: ['status'],                                   placement: DOC },
     { create: 'Submission Date',  match: ['submission date'],                          placement: DOC },
+    // Buyer fields — let the user tag a document before submission so the right
+    // buyer type/TIN/payment mode flow into EFRIS (T109/T108).
+    { create: 'Customer Type',    match: ['customer type', 'buyer type'],              placement: DOC },
+    { create: 'Buyer TIN',        match: ['buyer tin', 'customer tin'],                placement: DOC },
+    { create: 'Payment Method',   match: ['payment method', 'payment mode'],           placement: DOC },
     { create: 'Commodity Code',   match: ['commodity code'],                           placement: ITEM },
     { create: 'Category Path',    match: ['category path', 'segment / class grouping'],placement: ITEM },
   ];

@@ -284,6 +284,13 @@
         <button onclick="loadList($('pickSearch2')?$('pickSearch2').value:'')" style="flex:1;padding:8px;border:1px solid var(--bdr);background:white;border-radius:6px;cursor:pointer;font-weight:600;color:var(--gd);">&#128260; Refresh</button>
         <input id="pickSearch2" placeholder="Search reference / customer…" style="flex:2;padding:8px;border:1px solid var(--bdr);border-radius:6px;font-size:12px;" oninput="invSearch(this.value)" onkeydown="if(event.key==='Enter')loadList(this.value)"/>
       </div>
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;font-size:11px;color:var(--gray);flex-wrap:wrap;">
+        <span>Date:</span>
+        <input type="date" id="pickDateFrom" onchange="applyPickFilters()" style="padding:5px;border:1px solid var(--bdr);border-radius:5px;font-size:11px;"/>
+        <span>to</span>
+        <input type="date" id="pickDateTo" onchange="applyPickFilters()" style="padding:5px;border:1px solid var(--bdr);border-radius:5px;font-size:11px;"/>
+        <button class="btn bo bsm" style="font-size:10px;" onclick="$('pickDateFrom').value='';$('pickDateTo').value='';applyPickFilters()">Clear</button>
+      </div>
       <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--gray);margin-bottom:8px;cursor:pointer;"><input type="checkbox" id="chkUnsubmitted" onchange="toggleUnsubmitted(this)"/> Show only documents not yet submitted to EFRIS</label>
       <div id="pickList2"></div>
     </div>
@@ -320,6 +327,15 @@
           <button type="button" class="ctype-btn" data-type="b2b" onclick="setCustType('b2b')">Business (B2B)</button>
           <button type="button" class="ctype-btn" data-type="b2g" onclick="setCustType('b2g')">Government (B2G)</button>
           <button type="button" class="ctype-btn" data-type="foreign" onclick="setCustType('foreign')">Foreign / Tourist</button>
+        </div>
+      </div>
+      <!-- B2C fields — customer name is editable for receipts (defaults to Walk-in) -->
+      <div id="cust-b2c" class="cust-fields" style="display:none;">
+        <div class="fg mt"><label>Customer Name <span style="font-weight:400;color:var(--gray);">(optional)</span></label><input id="cB2cName" placeholder="Walk-in Customer"/></div>
+        <div class="fg"><label>TIN <span style="font-weight:400;color:var(--gray);">(optional)</span></label>
+          <div style="display:flex;gap:6px;"><input id="cB2cTIN" placeholder="If the customer has one" style="flex:1;"/>
+          <button type="button" class="btn bo bsm" onclick="_verifyTinInto(gvi('cB2cTIN'),'cB2cTINResult','cB2cName')" style="white-space:nowrap;">Verify &#128269;</button></div>
+          <div id="cB2cTINResult" style="font-size:11px;margin-top:3px;"></div>
         </div>
       </div>
       <!-- B2B fields -->
@@ -429,12 +445,24 @@
         <button type="button" class="ctype-btn" data-wktype="b2g" onclick="wkSetType('b2g')">Government</button>
         <button type="button" class="ctype-btn" data-wktype="foreign" onclick="wkSetType('foreign')">Foreign</button>
       </div>
+      <div id="wkCustB2c" class="cust-fields" style="display:none;margin-bottom:8px;">
+        <div class="fg" style="margin:0;"><label>TIN <span style="font-weight:400;color:var(--gray);">(optional — some walk-in customers have one)</span></label>
+          <div style="display:flex;gap:6px;"><input id="wkB2cTIN" placeholder="1000XXXXXXX" style="flex:1;"/><button type="button" class="btn bo bsm" onclick="wkVerifyTin('wkB2cTIN')">Verify</button></div>
+          <div id="wkB2cTINResult" style="font-size:11px;margin-top:3px;"></div>
+        </div>
+      </div>
       <div id="wkCustB2b" class="cust-fields" style="display:none;margin-bottom:8px;">
-        <div class="fg" style="margin:0;"><label>Business TIN</label><input id="wkTIN" placeholder="1000XXXXXXX"/></div>
+        <div class="fg" style="margin:0;"><label>Business TIN</label>
+          <div style="display:flex;gap:6px;"><input id="wkTIN" placeholder="1000XXXXXXX" style="flex:1;"/><button type="button" class="btn bo bsm" onclick="wkVerifyTin('wkTIN')">Verify</button></div>
+          <div id="wkTINResult" style="font-size:11px;margin-top:3px;"></div>
+        </div>
       </div>
       <div id="wkCustB2g" class="cust-fields" style="display:none;margin-bottom:8px;">
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-          <div class="fg" style="margin:0;"><label>Government TIN</label><input id="wkGovTIN"/></div>
+          <div class="fg" style="margin:0;"><label>Government TIN</label>
+            <div style="display:flex;gap:6px;"><input id="wkGovTIN" style="flex:1;"/><button type="button" class="btn bo bsm" onclick="wkVerifyTin('wkGovTIN')">Verify</button></div>
+            <div id="wkGovTINResult" style="font-size:11px;margin-top:3px;"></div>
+          </div>
           <div class="fg" style="margin:0;"><label>Department / Ministry</label><input id="wkGovDept"/></div>
         </div>
       </div>
@@ -1603,8 +1631,9 @@ function renderInv(inv){
   const curEl=$('dCurr'); if(curEl){ if(![...curEl.options].some(o=>o.value===curr)){ const o=document.createElement('option'); o.value=curr; o.textContent=curr; curEl.appendChild(o);} curEl.value=curr; }
   if(curr!=='UGX'){sh('fxRow');tx('fxLbl',curr);sv('fxVal',inv.ExchangeRate||'');}else hd('fxRow');
   // Auto-detect customer type from invoice data
+  const _cf=inv.CustomFields||{};
   const custName=(inv.Customer&&inv.Customer.Name)||inv.BuyerName||inv.CustomerName||'';
-  const custTINval=(inv.Customer&&inv.Customer.TIN)||inv.CustomerTIN||'';
+  const custTINval=(inv.Customer&&inv.Customer.TIN)||inv.CustomerTIN||_cf['Buyer TIN']||_cf['Customer TIN']||'';
   const isForeign=!!(inv.PassportNum||inv.Nationality);
   let autoType='b2c';
   if(isForeign) autoType='foreign';
@@ -1619,6 +1648,7 @@ function renderInv(inv){
   if(autoType==='b2b'&&custTINval) sv('cTIN',custTINval);
   if(autoType==='b2g'){if(custTINval)sv('cGovTIN',custTINval); if(custName)sv('cGovDept',custName);}
   if(autoType==='foreign'){if(inv.PassportNum)sv('cPassport',inv.PassportNum); if(inv.Nationality)sv('cNationality',inv.Nationality); if(custName)sv('cForeignName',custName);}
+  if(autoType==='b2c'){ sv('cB2cName', custName||''); sv('cB2cTIN', custTINval||''); }
   if(autoType!=='b2b'){sv('cTIN',''); ht('cTINResult','');}
   if(autoType!=='b2g'){sv('cGovTIN',''); sv('cGovDept',''); ht('cGovTINResult','');}
   if(autoType!=='foreign'){sv('cPassport',''); sv('cNationality',''); sv('cForeignName','');}
@@ -1683,15 +1713,28 @@ async function loadList(term){
       const subs=window.__submittedRefs||{};
       items=items.filter(i=>!subs[(i.reference||'').toLowerCase().trim()]);
     }
-    window.__invList=items;
-    el=target; // render into whichever picker is active
-    if(!window.__invList.length){ target.innerHTML='<div class="al ai">'+(term?'No matches for "'+esc(term)+'".':(_onlyUnsubmitted?'No unsubmitted documents.':'No sales invoices found.'))+'</div>'; return; }
-    var h='<div style="font-size:11px;color:var(--gray);margin:4px 0 8px;">'+(d.business||'')+' — tap an invoice or receipt:</div>';
-    window.__invList.forEach(function(i,idx){ var badge=i.docType==='receipt'?'<span class="pill pill-svc" style="margin-left:5px;">Receipt</span>':'<span class="pill pill-gds" style="margin-left:5px;">Invoice</span>'; var custLabel=i.customer||'<span style="color:var(--gray);font-style:italic;">Walk-in</span>'; h+='<div class="pick-row" onclick="pick('+idx+')" style="cursor:pointer;border:1px solid var(--bdr);border-radius:6px;padding:8px 10px;margin-bottom:6px;background:white;"><strong>'+(i.reference||'(no ref)')+'</strong> — '+custLabel+badge+'<br><span style="color:var(--gray);font-size:11px;">'+(i.currency||'')+' '+fn(i.amount)+' · '+fd(i.date)+'</span></div>'; });
-    // Render into both pickers so whichever is visible shows results.
-    if($('pickList')) $('pickList').innerHTML=h;
-    if($('pickList2')) $('pickList2').innerHTML=h;
+    window.__invListAll=items;       // full list (before date filter)
+    window.__business=d.business||'';
+    applyPickFilters();
   }catch(e){ target.innerHTML='<div class="al aw">Network error: '+e.message+'</div>'; }
+}
+// Apply the date-range filter to the loaded list and render both pickers.
+function applyPickFilters(){
+  const all=window.__invListAll||[];
+  const from=($('pickDateFrom')&&$('pickDateFrom').value)||'';
+  const to=($('pickDateTo')&&$('pickDateTo').value)||'';
+  const inRange=d=>{ if(!d)return true; const ds=(''+d).slice(0,10); if(from&&ds<from)return false; if(to&&ds>to)return false; return true; };
+  const items=(from||to)?all.filter(i=>inRange(i.date)):all;
+  window.__invList=items;
+  const empty=(from||to)?'No documents in that date range.':'No sales invoices found.';
+  let h;
+  if(!items.length){ h='<div class="al ai">'+empty+'</div>'; }
+  else {
+    h='<div style="font-size:11px;color:var(--gray);margin:4px 0 8px;">'+(window.__business||'')+' — '+items.length+' document'+(items.length===1?'':'s')+', tap to load:</div>';
+    items.forEach(function(i,idx){ var badge=i.docType==='receipt'?'<span class="pill pill-svc" style="margin-left:5px;">Receipt</span>':'<span class="pill pill-gds" style="margin-left:5px;">Invoice</span>'; var custLabel=i.customer||'<span style="color:var(--gray);font-style:italic;">Walk-in</span>'; h+='<div class="pick-row" data-idx="'+idx+'" onclick="pick('+idx+')" style="cursor:pointer;border:1px solid var(--bdr);border-radius:6px;padding:8px 10px;margin-bottom:6px;background:white;"><strong>'+(i.reference||'(no ref)')+'</strong> — '+custLabel+badge+'<br><span style="color:var(--gray);font-size:11px;">'+(i.currency||'')+' '+fn(i.amount)+' · '+fd(i.date)+'</span></div>'; });
+  }
+  if($('pickList')) $('pickList').innerHTML=h;
+  if($('pickList2')) $('pickList2').innerHTML=h;
 }
 function pick(idx){ var i=window.__invList[idx]; if(i){ hidSubPicker(); DKEY=i.key; _lastInvKey=i.key; showT('tSub',$('tabSub')); loadInv(i.key); } }
 // Build a set of references already submitted to EFRIS (from this tool's log) so the
@@ -1738,6 +1781,7 @@ function buildInv(opts){
   if(t==='b2b'){custTIN=gvi('cTIN')||(inv.CustomFields&&inv.CustomFields['Customer TIN'])||'';}
   else if(t==='b2g'){custTIN=gvi('cGovTIN');custDept=gvi('cGovDept');if(custDept&&!custName)custName=custDept;}
   else if(t==='foreign'){passportNum=gvi('cPassport');nationality=gvi('cNationality');const fn2=gvi('cForeignName');if(fn2)custName=fn2;}
+  else { const bn=gvi('cB2cName'); if(bn)custName=bn; custTIN=gvi('cB2cTIN')||''; }  // b2c: editable name + optional TIN
   const editedRef=(typeof gvi==='function'&&$('dNo'))?gvi('dNo').trim():'';
   const editedCur=$('dCurr')?$('dCurr').value:'';
   return{ Reference:(window._subRefOverride)||editedRef||inv.Reference||inv.Code||'INV-001', IssueDate:inv.IssueDate||inv.Date||new Date().toISOString().slice(0,10),
@@ -1927,9 +1971,31 @@ function wkReset(){
 function wkSetType(t){
   _wkType=t;
   document.querySelectorAll('[data-wktype]').forEach(b=>b.classList.toggle('on',b.dataset.wktype===t));
-  ['wkCustB2b','wkCustB2g','wkCustForeign'].forEach(id=>{ const el=$(id); if(el) el.style.display='none'; });
-  const map={b2b:'wkCustB2b',b2g:'wkCustB2g',foreign:'wkCustForeign'};
+  ['wkCustB2c','wkCustB2b','wkCustB2g','wkCustForeign'].forEach(id=>{ const el=$(id); if(el) el.style.display='none'; });
+  const map={b2c:'wkCustB2c',b2b:'wkCustB2b',b2g:'wkCustB2g',foreign:'wkCustForeign'};
   if(map[t]){ const el=$(map[t]); if(el) el.style.display=''; }
+}
+
+// Verify a TIN via EFRIS (T119) from the Issue Receipt screen and auto-fill the
+// customer/business name. fieldId is the TIN input to read.
+async function wkVerifyTin(fieldId){
+  const tin=(gvi(fieldId)||'').trim();
+  const resId=fieldId+'Result';
+  if(!tin){ ht(resId,'<span style="color:#c62828;">Enter a TIN first</span>'); return; }
+  ht(resId,'<span style="color:var(--gray);">Verifying…</span>');
+  try{
+    const r=await fetch(RELAY+'/api/efris/verify-tin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({buyerTin:tin,config:{tin:CFG.tin,deviceNo:CFG.deviceNo,efrisPassword:CFG.efrisPassword,mode:CFG.sandbox?'sandbox':'production'}})});
+    const d=await r.json();
+    const name=d.legalName||d.businessName||d.taxpayerName||d.name||'';
+    if(d.success&&name){
+      // Auto-fill the name field (business name for B2B/B2C, dept for B2G).
+      if(fieldId==='wkGovTIN'){ if(!gvi('wkGovDept'))sv('wkGovDept',name); }
+      else { sv('wkCustName',name); }
+      ht(resId,'<span style="color:#2e7d32;">&#10003; '+esc(name)+'</span>');
+    } else {
+      ht(resId,'<span style="color:#c62828;">'+esc(d.error||'Not found / invalid TIN')+'</span>');
+    }
+  }catch(e){ ht(resId,'<span style="color:#c62828;">'+esc(e.message)+'</span>'); }
 }
 
 function wkCurrChange(){
@@ -2127,7 +2193,7 @@ function wkBuildInvoice(){
   if(t==='b2b'){ CustomerTIN=gvi('wkTIN'); Customer={Name:custName,TIN:CustomerTIN}; }
   else if(t==='b2g'){ CustomerTIN=gvi('wkGovTIN'); CustomerDept=gvi('wkGovDept'); Customer={Name:CustomerDept||custName,TIN:CustomerTIN}; }
   else if(t==='foreign'){ PassportNum=gvi('wkPassport'); Nationality=gvi('wkNationality'); custName=gvi('wkForeignName')||custName; Customer={Name:custName}; }
-  else { Customer={Name:custName}; }
+  else { CustomerTIN=gvi('wkB2cTIN')||''; Customer={Name:custName,TIN:CustomerTIN}; }  // B2C: optional TIN
   // Build Manager-compatible Lines so buildT109() can process this on the backend
   const lines=_wkLines.map(l=>({
     ItemName:l.desc||'Item',
@@ -2137,7 +2203,11 @@ function wkBuildInvoice(){
     LineTotal:Math.round(((l.qty||1)*(l.price||0))*100)/100,
     TaxAmount:Math.round(((l.qty||1)*(l.price||0)*(l.vatRate||0)/100)*100)/100,
     TaxName:(l.vatRate||0)>0?'Standard VAT 18%':'',
-    EFRISUnitOfMeasure:l.unit&&l.unit!=='Each'?l.unit:'101',
+    // Leave the EFRIS unit blank — the backend fills it from the registered goods
+    // record (authoritative) so it never defaults to '101' (Stick). Pass the unit
+    // name as a fallback hint.
+    Unit:l.unit||'',
+    EFRISUnitOfMeasure:'',
     EFRISCommodityCode:l.catPath||'',
     _discount:l.discount||0,
   }));
@@ -2403,7 +2473,7 @@ async function bulkStart(){
       // Auto-detect customer type
       const s=INV.CustomFields||{};
       const sGet=(...k)=>{ for(const n of k){if(s[n])return s[n];} return null; };
-      const custTINval=(INV.Customer&&INV.Customer.TIN)||INV.CustomerTIN||'';
+      const custTINval=(INV.Customer&&INV.Customer.TIN)||INV.CustomerTIN||sGet('Buyer TIN','Customer TIN')||'';
       const isForeign=!!(INV.PassportNum||INV.Nationality);
       const mgrCT=sGet('Customer Type','CustomerType');
       const ctMap={'B2C':'b2c','B2B':'b2b','B2G':'b2g','Foreign':'foreign','b2c':'b2c','b2b':'b2b','b2g':'b2g','foreign':'foreign'};
