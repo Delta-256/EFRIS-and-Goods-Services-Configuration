@@ -4350,7 +4350,7 @@ async function mirrorStockToManager(direction,items,date,resultId){
   const _gi=(typeof gItems!=='undefined'&&gItems)?gItems:[];
   const payloadItems=items.map(i=>{
     const g=_gi.find(x=>(x.code||'').toLowerCase()===(i.itemCode||'').toLowerCase());
-    return {itemCode:i.itemCode,quantity:i.quantity,itemKey:(g&&g.managerId)||''};
+    return {itemCode:i.itemCode,quantity:i.quantity,unitPrice:i.unitPrice||i.unitCost||0,itemKey:(g&&g.managerId)||''};
   });
   _lastStockMirror={direction,items,date,resultId};
   const append=h=>{ const el=$(resultId); if(el) el.innerHTML+=h; };

@@ -1307,7 +1307,7 @@ app.post('/api/manager/inventory-adjust', async (req, res) => {
   // Normalise to a list of {itemKey?, itemCode?, qty}
   let items = Array.isArray(b.items) ? b.items.slice()
             : (b.itemKey || b.itemCode) ? [{ itemKey: b.itemKey, itemCode: b.itemCode, qty: b.qty }] : [];
-  items = items.map(i => ({ itemKey: i.itemKey || '', itemCode: i.itemCode || i.code || '', qty: parseFloat(i.qty != null ? i.qty : i.quantity) || 0 }))
+  items = items.map(i => ({ itemKey: i.itemKey || '', itemCode: i.itemCode || i.code || '', qty: parseFloat(i.qty != null ? i.qty : i.quantity) || 0, unitPrice: parseFloat(i.unitPrice != null ? i.unitPrice : i.unitCost) || 0 }))
                .filter(i => i.qty > 0 && (i.itemKey || i.itemCode));
   if (!items.length) return res.json({ success: false, error: 'No items with a positive quantity to mirror.' });
 
@@ -1328,21 +1328,16 @@ app.post('/api/manager/inventory-adjust', async (req, res) => {
     if (!key) { results.push({ item: it.itemCode || it.itemKey, ok: false, error: 'No item key' }); continue; }
     try {
       if (direction === 'in') {
-        // SAFE read-modify-write: GET the item's starting-balance form, set the
-        // quantity field that actually exists in it, PUT it back. No blind POSTs.
-        const g = await managerCall(ep, accessToken, 'GET', '/inventory-item-starting-balance-form/' + key, null);
-        if (g.status !== 200 || !g.data || typeof g.data !== 'object') {
-          results.push({ item: it.itemCode || key, ok: false, error: `Could not read starting-balance form (HTTP ${g.status}). ${JSON.stringify(g.data||'').slice(0,120)}` });
-          continue;
-        }
-        const form = Object.assign({}, g.data);
-        // Set whichever quantity field the form uses (Qty / Quantity), and a value.
-        const qtyField = ('Qty' in form) ? 'Qty' : ('Quantity' in form) ? 'Quantity' : 'Qty';
-        form[qtyField] = it.qty;
-        const r = await managerCall(ep, accessToken, 'PUT', '/inventory-item-starting-balance-form/' + key, form);
-        console.log(`   SB PUT ${key}: HTTP ${r.status} qtyField=${qtyField} formKeys=${Object.keys(form).join(',')}`);
-        if (r.status >= 200 && r.status < 400) results.push({ item: it.itemCode || key, ok: true, path: 'starting-balance', qtyField, formKeys: Object.keys(form) });
-        else results.push({ item: it.itemCode || key, ok: false, error: `Starting-balance PUT HTTP ${r.status}: ${JSON.stringify(r.data||'').slice(0,160)}`, formKeys: Object.keys(form) });
+        // Increase stock via a Purchase Invoice — the standard, non-corrupting
+        // way to receive inventory (shape confirmed from a real PI form).
+        const payload = {
+          IssueDate: (String(date).slice(0, 10)) + 'T00:00:00',
+          Lines: [{ Item: key, Qty: it.qty, PurchaseUnitPrice: parseFloat(it.unitPrice) || 0 }]
+        };
+        const r = await managerCall(ep, accessToken, 'POST', '/purchase-invoice-form', payload);
+        console.log(`   purchase-invoice POST: HTTP ${r.status} item=${key} qty=${it.qty} body=${JSON.stringify(r.data||'').slice(0,120)}`);
+        if (r.status >= 200 && r.status < 400) results.push({ item: it.itemCode || key, ok: true, path: 'purchase-invoice' });
+        else results.push({ item: it.itemCode || key, ok: false, error: `Purchase invoice HTTP ${r.status}: ${JSON.stringify(r.data||'').slice(0,160)}` });
       } else {
         // decrease → write-off document
         let r = await managerCall(ep, accessToken, 'POST', '/inventory-write-off-form', { Date: date, Description: description, Lines: [{ Item: key, Qty: it.qty }] });
