@@ -2097,6 +2097,8 @@ async function wkSubmit(){
     ht('wkRTitle','✓ '+_dl+' issued — submitted to URA EFRIS');
     tx('wkRFDN',d.fdn||'—'); tx('wkRAF',d.antifakeCode||'—');
     ht('wkRVerify',d.validationUrl?'<a href="'+esc(d.validationUrl)+'" target="_blank" rel="noopener" style="font-size:11px;color:#1565c0;">🔗 Verify on URA EFRIS Portal</a>':'');
+    // Also record the sale in Manager's books and save the FDN to it.
+    try{ await wkRecordInManager(inv,d); }catch(me){ console.warn('Manager record error:', me); }
     // Submission already succeeded — never let a print-preview hiccup surface as
     // a submit error.
     try{ wkPrintAfterSubmit(); }catch(pe){ console.warn('Receipt preview error:', pe); }
@@ -2111,6 +2113,25 @@ function logoForPrint(logo){
   logo = logo || '';
   if(logo.startsWith('data:')){ try{ localStorage.setItem('efris_print_logo', logo); return '__local__'; }catch(e){ return ''; } }
   return logo;
+}
+// Record a walk-in receipt in Manager (books) after it's submitted to EFRIS,
+// then save the FDN onto that Manager receipt.
+async function wkRecordInManager(inv,d){
+  const ep=CFG.managerEndpoint||MGR_EP, tk=CFG.accessToken||MGR_TK;
+  if(!ep||!tk) return;
+  const src=(inv&&inv._lines&&inv._lines.length)?inv._lines:_wkLines;
+  const lines=(src||[]).filter(l=>(l.desc||'').trim()).map(l=>({itemCode:l.itemCode||'',itemName:l.desc||'',description:l.desc||'',qty:parseFloat(l.qty)||1,unitPrice:parseFloat(l.price)||0}));
+  if(!lines.length) return;
+  const cr=await fetch(RELAY+'/api/manager/create-receipt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({managerEndpoint:ep,accessToken:tk,receipt:{date:(inv.IssueDate||new Date().toISOString().slice(0,10)),reference:inv.Reference||'',lines,description:'EFRIS e-Receipt — FDN '+(d.fdn||'')}})});
+  const cd=await cr.json();
+  const v=$('wkRVerify');
+  if(cd.success&&cd.key){
+    DKEY=cd.key;
+    try{ await saveMgr(d.fdn,d.qrCode,d.antifakeCode,d.deviceNo,d.issuedDate,d.invoiceId,d.validationUrl); }catch(_){ }
+    if(v) v.innerHTML+=' &middot; <span style="color:#2e7d32;">Recorded in Manager &#10003;</span>';
+  } else {
+    if(v) v.innerHTML+=' &middot; <span style="color:#c62828;">Not recorded in Manager: '+esc(cd.error||'failed')+'</span>';
+  }
 }
 function wkPrint(){
   const inv=wkBuildInvoice();

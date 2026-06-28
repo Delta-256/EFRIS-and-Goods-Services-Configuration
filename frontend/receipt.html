@@ -167,8 +167,8 @@ body { font-family: var(--sans); background: #e8ece8; color: var(--text); min-he
     <option value="Credit Note">Credit Note</option>
   </select></label>
   <label>Page <select id="selPage" onchange="setPageSize(this.value)">
+    <option value="A5" selected>A5 (half)</option>
     <option value="A4">A4</option>
-    <option value="A5">A5 (half)</option>
     <option value="Letter">Letter</option>
     <option value="80mm">80mm receipt</option>
   </select></label>
@@ -686,6 +686,8 @@ function toggleCodes(show) {
 
 /* ── Init ── */
 render();
+// Default to A5 (the common receipt size); user can switch in the Page control.
+try{ setPageSize((el('selPage')&&el('selPage').value)||'A5'); }catch(e){}
 </script>
 </body>
 </html>

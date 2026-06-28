@@ -1232,12 +1232,18 @@ app.post('/api/manager/create-receipt', async (req, res) => {
     form.QuantityColumn = true;
     form.UnitPriceColumn = true;
     form.HasLineDescription = true;
-    form.Lines = (receipt.lines || []).map(l => {
+    form.Lines = await Promise.all((receipt.lines || []).map(async l => {
       const line = { Qty: parseFloat(l.qty) || 1, UnitPrice: parseFloat(l.unitPrice) || 0 };
-      if (l.itemKey) line.Item = l.itemKey;
+      let key = l.itemKey;
+      // Link the line to the Manager inventory/service item (so stock/books update)
+      // by resolving from the code or name when no key was supplied.
+      if (!key && (l.itemCode || l.itemName)) {
+        try { const rk = await resolveManagerItemKey(ep, accessToken, l.itemCode, l.itemName); key = rk.key; } catch (_) {}
+      }
+      if (key) line.Item = key;
       if (l.description) line.LineDescription = l.description;
       return line;
-    });
+    }));
     const createR = await managerCall(ep, accessToken, 'POST', '/receipt-form', form);
     if (createR.status < 200 || createR.status >= 300) {
       return res.status(502).json({
