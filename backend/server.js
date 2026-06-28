@@ -2197,6 +2197,24 @@ app.get('/api/manager/sb-sample', async (req, res) => {
   } catch (e) { res.json({ success: false, error: e.message }); }
 });
 
+// Diagnostic: list custom themes + read one form, so we learn the theme shape
+// (name + Liquid/HTML body field) to create a branded default theme.
+app.get('/api/manager/theme-sample', async (req, res) => {
+  const { ep, tk } = mgrCreds(req);
+  if (!ep || !tk) return res.status(400).json({ success: false, error: 'ep, tk required' });
+  try {
+    const list = await managerCall(ep, tk, 'GET', '/custom-themes', null);
+    const arr = (list.data && (list.data.customThemes || list.data.CustomThemes || [])) || [];
+    const out = { success: true, count: arr.length, listKeys: Object.keys(list.data || {}), themes: arr.map(t => ({ key: t.key || t.Key, name: t.name || t.Name })) };
+    if (arr.length) {
+      const key = arr[0].key || arr[0].Key;
+      const f = await managerCall(ep, tk, 'GET', '/custom-theme-form/' + key, null);
+      out.sampleKey = key; out.form = f.data; out.formKeys = Object.keys(f.data || {});
+    }
+    res.json(out);
+  } catch (e) { res.json({ success: false, error: e.message }); }
+});
+
 // Diagnostic: read the most recent production order's form (after the user
 // creates one manually) so we learn the exact shape to mirror Manufacture/Assembly.
 app.get('/api/manager/po-sample', async (req, res) => {
