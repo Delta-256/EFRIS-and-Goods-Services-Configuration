@@ -1269,23 +1269,32 @@ app.post('/api/manager/create-receipt', async (req, res) => {
 
 // Resolve a Manager inventory-item key from its ItemCode (the code we keep in
 // sync with the EFRIS goodsCode). Returns null if not found.
-async function resolveManagerItemKey(ep, tk, code) {
-  if (!code) return { key: null, reason: 'no code' };
-  const want = String(code).trim().toLowerCase();
+async function resolveManagerItemKey(ep, tk, code, name) {
+  if (!code && !name) return { key: null, reason: 'no code' };
+  const want = String(code || '').trim().toLowerCase();
+  const wantName = String(name || '').trim().toLowerCase();
   const codeOf = i => String(i.code || i.Code || i.ItemCode || i.itemCode || '').trim().toLowerCase();
+  const nameOf = i => String(i.ItemName || i.itemName || i.name || i.Name || '').trim().toLowerCase();
+  const match = arr => {
+    let hit = want && arr.find(i => codeOf(i) === want);
+    if (!hit && wantName) hit = arr.find(i => nameOf(i) === wantName);
+    return hit;
+  };
   try {
-    // Fetch WITHOUT a ?fields filter — that filter omits the code field Manager
-    // actually returns (the list exposes it as "code"/"Code", not "ItemCode").
-    const r = await managerCall(ep, tk, 'GET', '/inventory-items', null);
-    const arr = (r.data && (r.data.inventoryItems || r.data.InventoryItems || [])) || [];
-    const hit = arr.find(i => codeOf(i) === want);
-    if (hit) return { key: hit.key || hit.Key || null };
-    // Not an inventory item — is it a non-inventory (service) item? Those can't
-    // hold stock in Manager, so tell the user precisely.
+    // The inventory list doesn't reliably expose the code column, so request it
+    // explicitly AND match by name as a fallback.
+    let arr = [];
+    for (const q of ['?fields=ItemCode', '']) {
+      const r = await managerCall(ep, tk, 'GET', '/inventory-items' + q, null);
+      arr = (r.data && (r.data.inventoryItems || r.data.InventoryItems || [])) || [];
+      const hit = match(arr);
+      if (hit) return { key: hit.key || hit.Key || null };
+    }
+    // Not an inventory item — is it a non-inventory (service) item?
     try {
       const nr = await managerCall(ep, tk, 'GET', '/non-inventory-items', null);
       const narr = (nr.data && (nr.data.nonInventoryItems || nr.data.NonInventoryItems || [])) || [];
-      if (narr.find(i => codeOf(i) === want)) return { key: null, reason: 'non-inventory' };
+      if (match(narr)) return { key: null, reason: 'non-inventory' };
     } catch (_) {}
     return { key: null, reason: 'not found' };
   } catch (_) { return { key: null, reason: 'lookup failed' }; }
@@ -1310,15 +1319,15 @@ app.post('/api/manager/inventory-adjust', async (req, res) => {
   // Normalise to a list of {itemKey?, itemCode?, qty}
   let items = Array.isArray(b.items) ? b.items.slice()
             : (b.itemKey || b.itemCode) ? [{ itemKey: b.itemKey, itemCode: b.itemCode, qty: b.qty }] : [];
-  items = items.map(i => ({ itemKey: i.itemKey || '', itemCode: i.itemCode || i.code || '', qty: parseFloat(i.qty != null ? i.qty : i.quantity) || 0, unitPrice: parseFloat(i.unitPrice != null ? i.unitPrice : i.unitCost) || 0 }))
-               .filter(i => i.qty > 0 && (i.itemKey || i.itemCode));
+  items = items.map(i => ({ itemKey: i.itemKey || '', itemCode: i.itemCode || i.code || '', itemName: i.itemName || i.name || '', qty: parseFloat(i.qty != null ? i.qty : i.quantity) || 0, unitPrice: parseFloat(i.unitPrice != null ? i.unitPrice : i.unitCost) || 0 }))
+               .filter(i => i.qty > 0 && (i.itemKey || i.itemCode || i.itemName));
   if (!items.length) return res.json({ success: false, error: 'No items with a positive quantity to mirror.' });
 
   const results = [];
   for (const it of items) {
     let key = it.itemKey;
-    if (!key && it.itemCode) {
-      const resolved = await resolveManagerItemKey(ep, accessToken, it.itemCode);
+    if (!key && (it.itemCode || it.itemName)) {
+      const resolved = await resolveManagerItemKey(ep, accessToken, it.itemCode, it.itemName);
       key = resolved.key;
       if (!key) {
         const msg = resolved.reason === 'non-inventory'
