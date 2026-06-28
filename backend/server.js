@@ -898,8 +898,10 @@ app.post('/api/goods/sync-to-manager', async (req, res) => {
       if (comCodeFieldKey && item.comCode) cfStrings[comCodeFieldKey] = item.comCode;
       if (catPathFieldKey && catPath)      cfStrings[catPathFieldKey] = catPath;
       if (Object.keys(cfStrings).length)   form.CustomFields2 = { Strings: cfStrings };
-      if (item.whenSold) form.WhenSold = item.whenSold;
-      if (item.whenPurchased) form.WhenPurchased = item.whenPurchased;
+      // Inventory items use SaleItemAccount/PurchaseItemAccount; non-inventory
+      // use WhenSold/WhenPurchased. Set both — Manager ignores the irrelevant one.
+      if (item.whenSold) { form.SaleItemAccount = item.whenSold; form.WhenSold = item.whenSold; }
+      if (item.whenPurchased) { form.PurchaseItemAccount = item.whenPurchased; form.WhenPurchased = item.whenPurchased; }
       if (item.division) form.Division = item.division;
       if (item.salesDivision) form.SalesDivision = item.salesDivision;
       if (!isService && item.costMethod != null && item.costMethod !== '') form.CostMethod = item.costMethod;
@@ -941,8 +943,8 @@ app.post('/api/goods/sync-to-manager', async (req, res) => {
       if (item.vat) {
         try { const tg = await mgrTaxCodeGuid(ep, accessToken, item.vat); if (tg) payload.TaxCode = tg; } catch(_) {}
       }
-      if (item.whenSold) payload.WhenSold = item.whenSold;
-      if (item.whenPurchased) payload.WhenPurchased = item.whenPurchased;
+      if (item.whenSold) { payload.SaleItemAccount = item.whenSold; payload.WhenSold = item.whenSold; }
+      if (item.whenPurchased) { payload.PurchaseItemAccount = item.whenPurchased; payload.WhenPurchased = item.whenPurchased; }
       if (item.division) payload.Division = item.division;
       if (item.salesDivision) payload.SalesDivision = item.salesDivision;
       if (!isService && item.costMethod != null && item.costMethod !== '') payload.CostMethod = item.costMethod;
@@ -1428,8 +1430,8 @@ app.get('/api/goods/manager-item-detail', async (req, res) => {
       division:               d.division || d.Division || '',
       salesDivision:          d.salesDivision || d.SalesDivision || '',
       costMethod:             d.costMethod != null ? d.costMethod : (d.CostMethod != null ? d.CostMethod : ''),
-      whenSold:               d.whenSold || d.WhenSold || '',
-      whenPurchased:          d.whenPurchased || d.WhenPurchased || '',
+      whenSold:               d.SaleItemAccount || d.saleItemAccount || d.WhenSold || d.whenSold || '',
+      whenPurchased:          d.PurchaseItemAccount || d.purchaseItemAccount || d.WhenPurchased || d.whenPurchased || '',
       comCode, catPath,
     }});
   } catch(e) {
