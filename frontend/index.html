@@ -2139,7 +2139,7 @@ async function wkRecordInManager(inv,d){
   const src=(inv&&inv._lines&&inv._lines.length)?inv._lines:_wkLines;
   const lines=(src||[]).filter(l=>(l.desc||'').trim()).map(l=>({itemCode:l.itemCode||'',itemName:l.desc||'',description:l.desc||'',qty:parseFloat(l.qty)||1,unitPrice:parseFloat(l.price)||0}));
   if(!lines.length) return;
-  const cr=await fetch(RELAY+'/api/manager/create-receipt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({managerEndpoint:ep,accessToken:tk,receipt:{date:(inv.IssueDate||new Date().toISOString().slice(0,10)),reference:inv.Reference||'',lines,description:'EFRIS e-Receipt — FDN '+(d.fdn||'')}})});
+  const cr=await fetch(RELAY+'/api/manager/create-receipt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({managerEndpoint:ep,accessToken:tk,receipt:{date:(inv.IssueDate||new Date().toISOString().slice(0,10)),reference:inv.Reference||'',currency:inv._currency||'UGX',lines,description:'EFRIS e-Receipt — FDN '+(d.fdn||'')}})});
   const cd=await cr.json();
   const v=$('wkRVerify');
   if(cd.success&&cd.key){

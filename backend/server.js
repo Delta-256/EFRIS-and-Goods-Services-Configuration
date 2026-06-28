@@ -1218,9 +1218,20 @@ app.post('/api/manager/create-receipt', async (req, res) => {
     let receivedIn = receipt.receivedIn || '';
     if (!receivedIn) {
       try {
+        const want = String(receipt.currency || 'UGX').toUpperCase();
         const bankR = await managerCall(ep, accessToken, 'GET', '/bank-and-cash-accounts', null);
         const arr = (bankR.data && (bankR.data.bankAndCashAccounts || bankR.data.BankAndCashAccounts)) || [];
-        if (arr.length) receivedIn = arr[0].key || arr[0].Key || '';
+        const accCur = a => String(a.currency || a.Currency || a.foreignCurrency || a.ForeignCurrency || '').toUpperCase();
+        const nm = a => String(a.name || a.Name || '');
+        // Match the receipt currency: an account in that currency; for UGX (base)
+        // prefer one with no foreign currency set / no foreign code in its name.
+        const pick =
+          arr.find(a => accCur(a) === want) ||
+          (want === 'UGX' ? arr.find(a => !accCur(a) && !/eur|usd|gbp|kes|tzs|rwf|euro|dollar|pound/i.test(nm(a))) : null) ||
+          (want === 'UGX' ? arr.find(a => !accCur(a)) : null) ||
+          arr.find(a => !/eur|usd|gbp|kes|tzs|rwf|euro|dollar|pound/i.test(nm(a))) ||
+          arr[0];
+        if (pick) receivedIn = pick.key || pick.Key || '';
       } catch(_) {}
     }
     const form = {};
