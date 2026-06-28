@@ -434,6 +434,10 @@
           </select>
         </div>
       </div>
+      <div class="fg" style="margin:0 0 8px;"><label>Receipt No.</label>
+        <input id="wkRef" placeholder="e.g. REC-001"/>
+        <span class="hint" style="font-size:10px;color:var(--gray);">Auto-generated — edit to use your own format (a default prefix can be set in Settings).</span>
+      </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;" id="wkFxRow" class="hidden">
         <div class="fg" style="margin:0;"><label>Exchange Rate (1 <span id="wkFxLbl">USD</span> = UGX)</label><input id="wkFxVal" type="number" placeholder="e.g. 3700" oninput="wkRecalc()"/></div>
       </div>
@@ -1087,6 +1091,7 @@
         </div>
       </div>
       <div class="fg"><label>Default "Issued by" name <span style="font-weight:400;color:var(--gray);">(optional)</span></label><input id="sIssuedBy" placeholder="e.g. Sarah Nakato"/><div class="hint">Staff member name shown at the bottom of receipts.</div></div>
+      <div class="fg"><label>Receipt No. prefix <span style="font-weight:400;color:var(--gray);">(optional)</span></label><input id="sRcptPrefix" placeholder="e.g. REC"/><div class="hint">Used to auto-build the receipt number (PREFIX-YYMMDD-001). You can still edit the number on each receipt.</div></div>
     </div>
     <div class="card"><div class="ct"><span class="ico-emoji">&#128272;</span><svg class="ico-svg" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg> EFRIS Credentials</div>
       <div class="fg"><label>TIN</label><input id="sTin"/></div>
@@ -1280,6 +1285,7 @@ function apCFG(){
   if(logoVal.startsWith('data:')){ sv('sLogo',''); } else { sv('sLogo',logoVal); }
   logoShowPreview(logoVal);
   sv('sIssuedBy',CFG.issuedBy||'');
+  sv('sRcptPrefix',CFG.receiptPrefix||'');
   sv('sTin',CFG.tin);sv('sDsn',CFG.deviceNo);sv('sPas',CFG.efrisPassword);sv('sBrn',CFG.brn);
   sv('sMgr',CFG.managerEndpoint);sv('sTok',CFG.accessToken);
   TG.vatReg=!!CFG.vatReg;TG.sandbox=CFG.sandbox!==false;TG.efrisEnabled=CFG.efrisEnabled!==false;
@@ -1329,6 +1335,7 @@ function saveSt(){
   CFG.legalName=gvi('sLeg');CFG.tradeName=gvi('sTrd');CFG.address=gvi('sAdr');CFG.phone=gvi('sPh');CFG.email=gvi('sEm');
   if(gvi('sLogo')) CFG.logoUrl=gvi('sLogo');
   CFG.issuedBy=gvi('sIssuedBy');
+  CFG.receiptPrefix=gvi('sRcptPrefix');
   CFG.tin=gvi('sTin');CFG.deviceNo=gvi('sDsn');CFG.efrisPassword=gvi('sPas');CFG.brn=gvi('sBrn');
   CFG.managerEndpoint=gvi('sMgr').replace(/\/+$/,'');CFG.accessToken=gvi('sTok');
   CFG.vatReg=TG.vatReg;CFG.sandbox=TG.sandbox;CFG.efrisEnabled=TG.efrisEnabled;
@@ -1839,8 +1846,18 @@ function wkInit(){
   wkReset();
 }
 
+// Default receipt number: <prefix>-<YYMMDD>-<seq>. Prefix is configurable in
+// Settings (CFG.receiptPrefix); the seq increments per device. The field is
+// editable, so businesses can also just type their own format.
+function nextReceiptNo(){
+  const prefix=((CFG.receiptPrefix||'REC')+'').trim()||'REC';
+  const d=new Date(), ymd=d.toISOString().slice(2,10).replace(/-/g,'');
+  let n; try{ n=(parseInt(localStorage.getItem('efris_rcpt_seq')||'0',10)||0)+1; localStorage.setItem('efris_rcpt_seq',String(n)); }catch(e){ n=Math.floor(Math.random()*900)+100; }
+  return prefix+'-'+ymd+'-'+String(n).padStart(3,'0');
+}
 function wkReset(){
   _wkType='b2c'; _wkLines=[{desc:'',qty:1,unit:'Each',price:0,vatRate:0,discount:0,itemCode:'',catPath:''}]; _wkPays=[{mode:'102',amount:''}]; _wkLastResult=null;
+  sv('wkRef', nextReceiptNo());
   sv('wkCustName',''); sv('wkTIN',''); sv('wkGovTIN',''); sv('wkGovDept',''); sv('wkForeignName',''); sv('wkPassport',''); sv('wkNationality','');
   const rc=$('wkRCard'); if(rc) rc.style.display='none';
   const fc=document.getElementById('wkCurr'); if(fc) fc.value='UGX';
@@ -2075,7 +2092,7 @@ function wkBuildInvoice(){
     CustomerName:Customer.Name||custName, PassportNum, Nationality, CustomerDept,
     CustomerAddress:'', CustomerEmail:'', Currency:curr,
     ExchangeRate:curr!=='UGX'?fx:undefined,
-    Reference:'WLK-'+Date.now(), IssueDate:new Date().toISOString().slice(0,10),
+    Reference:(gvi('wkRef')||'').trim()||nextReceiptNo(), IssueDate:new Date().toISOString().slice(0,10),
     PayWays:payWays, Total:total,
     _walkIn:true, _custName:Customer.Name||custName,
     _total:total, _currency:curr, _fx:fx,
@@ -2097,6 +2114,8 @@ async function wkSubmit(){
     ht('wkRTitle','✓ '+_dl+' issued — submitted to URA EFRIS');
     tx('wkRFDN',d.fdn||'—'); tx('wkRAF',d.antifakeCode||'—');
     ht('wkRVerify',d.validationUrl?'<a href="'+esc(d.validationUrl)+'" target="_blank" rel="noopener" style="font-size:11px;color:#1565c0;">🔗 Verify on URA EFRIS Portal</a>':'');
+    // Also record the sale in Manager's books and save the FDN to it.
+    try{ await wkRecordInManager(inv,d); }catch(me){ console.warn('Manager record error:', me); }
     // Submission already succeeded — never let a print-preview hiccup surface as
     // a submit error.
     try{ wkPrintAfterSubmit(); }catch(pe){ console.warn('Receipt preview error:', pe); }
@@ -2111,6 +2130,25 @@ function logoForPrint(logo){
   logo = logo || '';
   if(logo.startsWith('data:')){ try{ localStorage.setItem('efris_print_logo', logo); return '__local__'; }catch(e){ return ''; } }
   return logo;
+}
+// Record a walk-in receipt in Manager (books) after it's submitted to EFRIS,
+// then save the FDN onto that Manager receipt.
+async function wkRecordInManager(inv,d){
+  const ep=CFG.managerEndpoint||MGR_EP, tk=CFG.accessToken||MGR_TK;
+  if(!ep||!tk) return;
+  const src=(inv&&inv._lines&&inv._lines.length)?inv._lines:_wkLines;
+  const lines=(src||[]).filter(l=>(l.desc||'').trim()).map(l=>({itemCode:l.itemCode||'',itemName:l.desc||'',description:l.desc||'',qty:parseFloat(l.qty)||1,unitPrice:parseFloat(l.price)||0}));
+  if(!lines.length) return;
+  const cr=await fetch(RELAY+'/api/manager/create-receipt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({managerEndpoint:ep,accessToken:tk,receipt:{date:(inv.IssueDate||new Date().toISOString().slice(0,10)),reference:inv.Reference||'',lines,description:'EFRIS e-Receipt — FDN '+(d.fdn||'')}})});
+  const cd=await cr.json();
+  const v=$('wkRVerify');
+  if(cd.success&&cd.key){
+    DKEY=cd.key;
+    try{ await saveMgr(d.fdn,d.qrCode,d.antifakeCode,d.deviceNo,d.issuedDate,d.invoiceId,d.validationUrl); }catch(_){ }
+    if(v) v.innerHTML+=' &middot; <span style="color:#2e7d32;">Recorded in Manager &#10003;</span>';
+  } else {
+    if(v) v.innerHTML+=' &middot; <span style="color:#c62828;">Not recorded in Manager: '+esc(cd.error||'failed')+'</span>';
+  }
 }
 function wkPrint(){
   const inv=wkBuildInvoice();
