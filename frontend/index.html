@@ -880,6 +880,17 @@
         <h4>Run through First-Time Setup</h4>
         <p>Click <strong>Settings</strong> if you've already completed setup, or re-open EFRISConnect to run the setup wizard. Fill in all fields. Test the Manager connection — it should show ✓ Connected. Save &amp; Start.</p>
       </div></div>
+
+      <div class="gs"><div class="gn">7</div><div class="gb">
+        <h4>Install the branded receipt theme <span style="font-weight:400;color:var(--gray);">(recommended)</span></h4>
+        <p>Make your Manager <strong>receipts, invoices &amp; credit notes</strong> print in the EFRISConnect style — branded header, your logo, and a scannable <strong>EFRIS QR code</strong> (works offline).</p>
+        <button class="btn bg bsm" onclick="copyBrandedTheme(this)">📋 Copy branded theme to clipboard</button>
+        <p style="margin-top:8px;">Then in Manager:</p>
+        <p style="margin:0 0 4px;">1. <strong>Settings → Themes → New Theme</strong></p>
+        <p style="margin:0 0 4px;">2. Delete the sample content, <strong>paste</strong> (Ctrl+V), set <strong>Name</strong> to <code>EFRISConnect</code>, then <strong>Create</strong>.</p>
+        <p style="margin:0 0 4px;">3. Make it the default: open <strong>Sales Invoices</strong> (then <strong>Receipts</strong> and <strong>Credit Notes</strong>) → click <strong>Form Defaults</strong> <em>(button at the bottom of the list)</em> → tick <strong>Custom theme</strong> → choose <code>EFRISConnect</code> → <strong>Update</strong>.</p>
+        <p style="margin-top:6px;"><em>💡 Set your logo in Manager → Settings → Business Details — it then shows on every branded document.</em></p>
+      </div></div>
     </div>
 
     <!-- ── SUBMIT ── -->
@@ -2531,6 +2542,24 @@ async function numSave(){
     // reset form
     ['nfId','nfName','nfPrefix','nfDiv','nfProj'].forEach(id=>{ document.getElementById(id).value=''; });
   }catch(e){ alert('Error: '+e.message); }
+}
+
+// Copy the branded Manager theme to the clipboard so the user can paste it
+// straight into Manager → Settings → Themes (no need to open the raw URL).
+async function copyBrandedTheme(btn){
+  const old=btn.textContent;
+  btn.disabled=true; btn.textContent='Fetching theme…';
+  try{
+    const r=await fetch(RELAY+'/branded-theme');
+    const t=await r.text();
+    await navigator.clipboard.writeText(t);
+    btn.textContent='✓ Copied! Now paste it into Manager → Settings → Themes';
+  }catch(e){
+    // Clipboard blocked (e.g. inside an iframe) — open the theme to copy manually.
+    try{ window.open(RELAY+'/branded-theme','_blank'); }catch(_){}
+    btn.textContent='Opened theme in a tab — select all (Ctrl+A) & copy';
+  }
+  setTimeout(()=>{ btn.disabled=false; btn.textContent=old; },5000);
 }
 
 // ── Guide section nav ──────────────────────────────────────────

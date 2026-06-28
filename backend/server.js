@@ -2691,10 +2691,14 @@ app.get('/receipt', (req, res) => {
 app.get('/branded-theme', (req, res) => {
   try {
     let html = fs.readFileSync(path.join(FRONTEND, 'manager-theme.html'), 'utf8');
-    // Inline the offline QR encoder so the theme is fully self-contained.
+    // Inline the offline QR encoder INSIDE the main body script (not a separate
+    // head <script>, which Manager rendered as text) so the theme is fully
+    // self-contained and the encoder runs in the same context as the renderer.
     try {
       const lib = fs.readFileSync(path.join(FRONTEND, 'qrcode.lib.js'), 'utf8');
-      html = html.replace('<!--@QRLIB@-->', '<script>\n' + lib + '\n</script>');
+      // Use a function replacement — a string replacement would interpret the
+      // "$'" inside the lib (case '$') as a special pattern and corrupt the output.
+      html = html.replace('/*@QRLIB@*/', () => lib + '\n;');
     } catch (_) {}
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.send(html);
