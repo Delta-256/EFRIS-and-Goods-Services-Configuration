@@ -1394,6 +1394,8 @@ app.get('/api/goods/manager-item-detail', async (req, res) => {
     const r = await managerCall(ep, tk, 'GET', itemPath, null);
     if (r.status !== 200) return res.json({ success: false, error: `Manager returned HTTP ${r.status}` });
     const d = r.data || {};
+    // Diagnostic: return the raw form so we can see the exact account field names.
+    if (req.query.raw) return res.json({ success: true, raw: d, keys: Object.keys(d) });
     // Manager returns camelCase on GET; normalize both cases
     const cf2 = d.customFields2 || d.CustomFields2 || {};
     const cfStrings = cf2.strings || cf2.Strings || {};
