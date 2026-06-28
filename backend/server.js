@@ -1329,14 +1329,23 @@ app.post('/api/manager/inventory-adjust', async (req, res) => {
     if (!key) { results.push({ item: it.itemCode || it.itemKey, ok: false, error: 'No item key' }); continue; }
     try {
       if (direction === 'in') {
-        // Increase stock via a Purchase Invoice — the standard, non-corrupting
-        // way to receive inventory (shape confirmed from a real PI form).
+        // Route by EFRIS stock-in type to the matching Manager document.
+        //   101 Import, 102 Local Purchase → Purchase Invoice (verified shape)
+        //   103 Manufacture/Assembly      → Production Order   (shape pending)
+        //   104 Opening Stock             → Purchase Invoice for now (safe);
+        //                                    true Starting Balance pending shape.
+        const sit = String(b.stockInType || '').trim();
+        if (sit === '103') {
+          results.push({ item: it.itemCode || key, ok: false, error: 'Manufacture/Assembly → Production Order mirroring is not enabled yet (capturing the form shape). Use Local Purchase to push via Purchase Invoice, or record the Production Order in Manager directly.' });
+          continue;
+        }
+        // Purchase Invoice — standard, non-corrupting way to receive inventory.
         const payload = {
           IssueDate: (String(date).slice(0, 10)) + 'T00:00:00',
           Lines: [{ Item: key, Qty: it.qty, PurchaseUnitPrice: parseFloat(it.unitPrice) || 0 }]
         };
         const r = await managerCall(ep, accessToken, 'POST', '/purchase-invoice-form', payload);
-        console.log(`   purchase-invoice POST: HTTP ${r.status} item=${key} qty=${it.qty} body=${JSON.stringify(r.data||'').slice(0,120)}`);
+        console.log(`   purchase-invoice POST (type ${sit}): HTTP ${r.status} item=${key} qty=${it.qty} body=${JSON.stringify(r.data||'').slice(0,120)}`);
         if (r.status >= 200 && r.status < 400) results.push({ item: it.itemCode || key, ok: true, path: 'purchase-invoice' });
         else results.push({ item: it.itemCode || key, ok: false, error: `Purchase invoice HTTP ${r.status}: ${JSON.stringify(r.data||'').slice(0,160)}` });
       } else {
@@ -2125,6 +2134,21 @@ app.get('/api/manager/sb-sample', async (req, res) => {
     if (!resolved.key) return res.json({ success: false, error: 'item not found', reason: resolved.reason });
     const g = await managerCall(ep, tk, 'GET', '/inventory-item-starting-balance-form/' + resolved.key, null);
     res.json({ success: g.status === 200, status: g.status, key: resolved.key, form: g.data });
+  } catch (e) { res.json({ success: false, error: e.message }); }
+});
+
+// Diagnostic: read the most recent production order's form (after the user
+// creates one manually) so we learn the exact shape to mirror Manufacture/Assembly.
+app.get('/api/manager/po-sample', async (req, res) => {
+  const { ep, tk } = mgrCreds(req);
+  if (!ep || !tk) return res.status(400).json({ success: false, error: 'ep, tk required' });
+  try {
+    const list = await managerCall(ep, tk, 'GET', '/production-orders', null);
+    const arr = (list.data && (list.data.productionOrders || list.data.ProductionOrders || [])) || [];
+    if (!arr.length) return res.json({ success: false, error: 'No production orders found to sample', listKeys: Object.keys(list.data || {}) });
+    const key = arr[0].key || arr[0].Key;
+    const f = await managerCall(ep, tk, 'GET', '/production-order-form/' + key, null);
+    res.json({ success: f.status === 200, status: f.status, key, form: f.data });
   } catch (e) { res.json({ success: false, error: e.message }); }
 });
 
