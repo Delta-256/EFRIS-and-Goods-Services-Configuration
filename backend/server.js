@@ -1336,7 +1336,14 @@ app.post('/api/manager/inventory-adjust', async (req, res) => {
         //                                    true Starting Balance pending shape.
         const sit = String(b.stockInType || '').trim();
         if (sit === '103') {
-          results.push({ item: it.itemCode || key, ok: false, error: 'Manufacture/Assembly → Production Order mirroring is not enabled yet (capturing the form shape). Use Local Purchase to push via Purchase Invoice, or record the Production Order in Manager directly.' });
+          // Manufacture/Assembly → Production Order (finished item + qty). Bill of
+          // materials / labour live in Manager, so we create a minimal order that
+          // adds the produced quantity; the user can add the recipe in Manager.
+          const po = { Date: (String(date).slice(0, 10)) + 'T00:00:00', FinishedInventoryItem: key, Qty: it.qty, BillOfMaterials: [] };
+          const r = await managerCall(ep, accessToken, 'POST', '/production-order-form', po);
+          console.log(`   production-order POST: HTTP ${r.status} item=${key} qty=${it.qty} body=${JSON.stringify(r.data||'').slice(0,120)}`);
+          if (r.status >= 200 && r.status < 400) results.push({ item: it.itemCode || key, ok: true, path: 'production-order' });
+          else results.push({ item: it.itemCode || key, ok: false, error: `Production order HTTP ${r.status}: ${JSON.stringify(r.data||'').slice(0,160)}` });
           continue;
         }
         // Purchase Invoice — standard, non-corrupting way to receive inventory.
