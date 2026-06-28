@@ -54,16 +54,41 @@
   .footers{margin-top:14px;font-size:11px;color:var(--muted);border-top:1px solid var(--line);padding-top:10px;}
   a{color:var(--accent-lt);}
   @page{margin:10mm;size:A5;}
+  #themeControls{max-width:760px;margin:10px auto 0;display:flex;flex-wrap:wrap;gap:10px;align-items:center;font-size:12px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 12px;}
+  #themeControls select{font-size:12px;padding:3px 6px;border:1px solid var(--line);border-radius:4px;background:#fff;}
+  #themeControls button{font-size:12px;padding:5px 12px;border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:5px;cursor:pointer;}
   @media print{
     body{background:#fff;}
     main{box-shadow:none;border:none;margin:0;max-width:100%;border-radius:0;}
+    #themeControls{display:none !important;}
   }
 </style>
 </head>
 <body>
+<div id="themeControls">
+  <label>Page size:&nbsp;<select id="themePage" onchange="themeSetPage(this.value)">
+    <option value="A5" selected>A5 (half page)</option>
+    <option value="A4">A4</option>
+    <option value="Letter">Letter</option>
+    <option value="80mm">80mm thermal receipt</option>
+  </select></label>
+  <button onclick="window.print()">&#128438; Print / Save PDF</button>
+  <span style="font-size:10.5px;color:var(--muted);">This bar is hidden on the printout.</span>
+</div>
 <main></main>
 <script>
 /*@QRLIB@*/ /* offline QR encoder injected here (inside this script) when served via /branded-theme */
+// Adjustable page size (mirrors the extension's print feature). Injects a dynamic
+// @page + sheet width; 80mm targets thermal receipt printers.
+function themeSetPage(v){
+  var sizes={A4:['210mm 297mm','794px'],A5:['148mm 210mm','559px'],Letter:['216mm 279mm','816px'],'80mm':['80mm auto','302px']};
+  var cfg=sizes[v]||sizes.A5;
+  var st=document.getElementById('themePageStyle')||document.createElement('style');
+  st.id='themePageStyle';
+  st.textContent='@media print{@page{size:'+cfg[0]+';margin:'+(v==='80mm'?'0':'8mm')+';}} main{max-width:'+cfg[1]+';}';
+  document.head.appendChild(st);
+}
+try{ themeSetPage('A5'); }catch(e){}
 // Brand theme for Manager documents (receipt / invoice / credit note / etc.).
 // Fetches the document and renders it in the EFRISConnect branded style, with a
 // scannable QR built from the EFRIS "QR Code" validation URL custom field.
