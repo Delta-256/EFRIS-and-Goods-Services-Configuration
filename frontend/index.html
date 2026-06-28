@@ -1965,10 +1965,29 @@ async function wkLoadCatalog(){
   try{
     const ep=encodeURIComponent(CFG.managerEndpoint||'');
     const tk=encodeURIComponent(CFG.accessToken||'');
-    if(!CFG.managerEndpoint) return;
-    const r=await fetch(RELAY+'/api/goods/manager-items?ep='+ep+'&tk='+tk);
-    const d=await r.json();
-    if(d.success && d.items) _wkCatalog=d.items;
+    let mgr=[];
+    if(CFG.managerEndpoint){
+      const r=await fetch(RELAY+'/api/goods/manager-items?ep='+ep+'&tk='+tk);
+      const d=await r.json();
+      if(d.success && d.items) mgr=d.items;
+    }
+    // Pull EFRIS-registered goods (T127) — these carry the exact goodsCode,
+    // measureUnit and unitPrice that T109 needs, so a receipt line never errors
+    // with rc 41 "item does not exist".
+    let efris=[];
+    if(CFG.tin && CFG.deviceNo){
+      try{
+        const er=await fetch(RELAY+'/api/efris/search-goods',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tin:CFG.tin,deviceNo:CFG.deviceNo,efrisPassword:CFG.efrisPassword,mode:CFG.sandbox?'sandbox':'production',query:''})});
+        const ed=await er.json();
+        if(ed.success&&Array.isArray(ed.items)) efris=ed.items.map(g=>({name:g.goodsName||g.name||'',code:g.goodsCode||'',efrisUom:g.measureUnit||'',price:parseFloat(g.unitPrice)||0,_efris:true}));
+      }catch(_){}
+    }
+    // Merge by name: enrich Manager items with the EFRIS code/unit/price; add any
+    // EFRIS-only goods not present in Manager.
+    const byName={};
+    mgr.forEach(m=>{ if(m.name) byName[m.name.toLowerCase()]=m; });
+    efris.forEach(g=>{ const k=(g.name||'').toLowerCase(); if(!k) return; if(byName[k]){ const m=byName[k]; if(g.code) m.code=g.code; if(g.efrisUom) m.efrisUom=g.efrisUom; if(!m.price&&g.price) m.price=g.price; } else { byName[k]=g; } });
+    _wkCatalog=Object.values(byName);
     wkRebuildDatalist();
   }catch(e){}
 }
