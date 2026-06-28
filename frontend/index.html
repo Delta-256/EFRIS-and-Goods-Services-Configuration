@@ -2197,24 +2197,35 @@ function openReceiptUrl(url){
   const old=$('printFrame'); if(old){ try{ old.remove(); }catch(_){} }
   const f=document.createElement('iframe');
   f.id='printFrame';
-  f.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;';
+  // Off-screen but with REAL A4-ish dimensions — a 0x0/hidden iframe has no
+  // layout and prints a blank page. contentWindow.print() prints the full
+  // document regardless of this element's height.
+  f.style.cssText='position:fixed;left:-10000px;top:0;width:794px;height:1123px;border:0;background:#fff;';
   let printed=false;
   const fire=()=>{
     if(printed) return; printed=true;
     try{
       const w=f.contentWindow;
       w.focus();
-      try{ w.addEventListener('afterprint',()=>{ setTimeout(()=>{ try{ f.remove(); }catch(_){} },300); }); }catch(_){}
+      try{ w.addEventListener('afterprint',()=>{ setTimeout(()=>{ try{ f.remove(); }catch(_){} },500); }); }catch(_){}
       w.print();
-      // Fallback cleanup if afterprint never fires
       setTimeout(()=>{ try{ if($('printFrame')) f.remove(); }catch(_){} }, 60000);
     }catch(e){
-      // Cross-origin or sandbox blocked the iframe — fall back to a direct link.
       try{ f.remove(); }catch(_){}
       _printFallbackLink(url);
     }
   };
-  f.onload=()=>setTimeout(fire,150);
+  // Wait until the receipt has actually rendered content before printing —
+  // fixes the "blank page / needs a second click" timing.
+  f.onload=()=>{
+    let tries=0;
+    const ready=()=>{
+      tries++; let ok=false;
+      try{ const doc=f.contentDocument||f.contentWindow.document; const s=doc.getElementById('sheet')||doc.body; ok=!!(s && (s.innerText||'').replace(/\s/g,'').length>20); }catch(_){ ok=true; }
+      if(ok||tries>30){ fire(); } else { setTimeout(ready,100); }
+    };
+    setTimeout(ready,120);
+  };
   document.body.appendChild(f);
   f.src=url;
 }
