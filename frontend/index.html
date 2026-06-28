@@ -3046,6 +3046,17 @@ async function gLoadAccounts(){
       }
     }catch(e){}
   }
+  // Re-apply any account selection requested before the dropdown finished loading
+  gApplyPendingAccts();
+}
+// Imported/edited items request account selections before gLoadAccounts has
+// populated the option lists; apply them once the options exist.
+let _pendingAccts=null;
+function gApplyPendingAccts(){
+  if(!_pendingAccts) return;
+  const s=$('gFldWhenSold'), p=$('gFldWhenPurchased');
+  if(s&&_pendingAccts.sold) s.value=_pendingAccts.sold;
+  if(p&&_pendingAccts.purchased) p.value=_pendingAccts.purchased;
 }
 
 const _EFRIS_UOM_MAP = {
@@ -3337,9 +3348,23 @@ function gRefreshList(){
 
 function gDeleteItem(i){ if(!confirm('Delete "'+gItems[i].name+'"?'))return; gItems.splice(i,1); gSaveItems(); gRefreshList(); }
 
-function gEditItem(i){
+async function gEditItem(i){
   const it=gItems[i]; if(!it)return;
   gEditingIdx=i;
+  // If the item is synced to Manager, pull its live detail (accounts, commodity
+  // code/path) so Edit reflects what's actually stored there.
+  if(it.managerId){
+    try{
+      const ep=encodeURIComponent(CFG.managerEndpoint||''), tk=encodeURIComponent(CFG.accessToken||'');
+      const dr=await fetch(RELAY+'/api/goods/manager-item-detail?ep='+ep+'&tk='+tk+'&key='+encodeURIComponent(it.managerId)+'&type='+encodeURIComponent(it.type||'Service'));
+      const dd=await dr.json();
+      if(dd.success&&dd.item){ const m=dd.item;
+        if(m.whenSold) it.whenSold=m.whenSold;
+        if(m.whenPurchased) it.whenPurchased=m.whenPurchased;
+        if(m.comCode&&!it.comCode){ it.comCode=m.comCode; if(m.catPath){ const p=m.catPath.split('>>').map(s=>s.trim()); it.segment=p[0]||''; it.family=p[1]||''; it.cls=p[2]||''; } }
+      }
+    }catch(e){}
+  }
   // Restore commodity context so step 5 works without re-doing the wizard
   if(it.comCode&&it.comName){ gCOM={k:it.comCode,n:it.comName}; } else { gCOM=null; }
   if(it.segCode&&it.segment){ gSEG={k:it.segCode,n:it.segment}; } else { gSEG=null; }
@@ -3376,8 +3401,8 @@ function gEditItem(i){
   const vatEl=$('gFldVat'); if(vatEl) vatEl.value=it.vat||'Standard';
   const excEl=$('gFldExcise'); if(excEl) excEl.value=it.excise||'No';
   const remEl=$('gFldRemarks'); if(remEl) remEl.value=it.remarks||'';
-  if($('gFldWhenSold')) $('gFldWhenSold').value=it.whenSold||'';
-  if($('gFldWhenPurchased')) $('gFldWhenPurchased').value=it.whenPurchased||'';
+  _pendingAccts={sold:it.whenSold||'',purchased:it.whenPurchased||''};
+  gApplyPendingAccts();
   if($('gFldDivision')) $('gFldDivision').value=it.division||'';
   if($('gFldAutoSalesDivision')) $('gFldAutoSalesDivision').checked=!!(it.salesDivision&&it.salesDivision===it.division);
   if($('gFldCostMethod')) $('gFldCostMethod').value=it.costMethod!=null?String(it.costMethod):'';
@@ -3649,8 +3674,8 @@ async function gImportManagerItem(idx){
     if(detail&&detail.division&&$('gFldDivision')) $('gFldDivision').value=detail.division;
     if($('gFldAutoSalesDivision')) $('gFldAutoSalesDivision').checked=!!(detail&&detail.salesDivision&&detail.salesDivision===detail.division);
     if(detail&&detail.costMethod!=null&&$('gFldCostMethod')) $('gFldCostMethod').value=String(detail.costMethod);
-    if(detail&&detail.whenSold&&$('gFldWhenSold')) $('gFldWhenSold').value=detail.whenSold;
-    if(detail&&detail.whenPurchased&&$('gFldWhenPurchased')) $('gFldWhenPurchased').value=detail.whenPurchased;
+    _pendingAccts={sold:(detail&&detail.whenSold)||'',purchased:(detail&&detail.whenPurchased)||''};
+    gApplyPendingAccts();
     gOnTypeChange();
     if(unitName) gAutoEfrisUom(unitName);
     // Make sure the Sync / Register buttons are visible for this imported item.
