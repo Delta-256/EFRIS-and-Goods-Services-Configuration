@@ -1965,10 +1965,29 @@ async function wkLoadCatalog(){
   try{
     const ep=encodeURIComponent(CFG.managerEndpoint||'');
     const tk=encodeURIComponent(CFG.accessToken||'');
-    if(!CFG.managerEndpoint) return;
-    const r=await fetch(RELAY+'/api/goods/manager-items?ep='+ep+'&tk='+tk);
-    const d=await r.json();
-    if(d.success && d.items) _wkCatalog=d.items;
+    let mgr=[];
+    if(CFG.managerEndpoint){
+      const r=await fetch(RELAY+'/api/goods/manager-items?ep='+ep+'&tk='+tk);
+      const d=await r.json();
+      if(d.success && d.items) mgr=d.items;
+    }
+    // Pull EFRIS-registered goods (T127) — these carry the exact goodsCode,
+    // measureUnit and unitPrice that T109 needs, so a receipt line never errors
+    // with rc 41 "item does not exist".
+    let efris=[];
+    if(CFG.tin && CFG.deviceNo){
+      try{
+        const er=await fetch(RELAY+'/api/efris/search-goods',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tin:CFG.tin,deviceNo:CFG.deviceNo,efrisPassword:CFG.efrisPassword,mode:CFG.sandbox?'sandbox':'production',query:''})});
+        const ed=await er.json();
+        if(ed.success&&Array.isArray(ed.items)) efris=ed.items.map(g=>({name:g.goodsName||g.name||'',code:g.goodsCode||'',efrisUom:g.measureUnit||'',price:parseFloat(g.unitPrice)||0,_efris:true}));
+      }catch(_){}
+    }
+    // Merge by name: enrich Manager items with the EFRIS code/unit/price; add any
+    // EFRIS-only goods not present in Manager.
+    const byName={};
+    mgr.forEach(m=>{ if(m.name) byName[m.name.toLowerCase()]=m; });
+    efris.forEach(g=>{ const k=(g.name||'').toLowerCase(); if(!k) return; if(byName[k]){ const m=byName[k]; if(g.code) m.code=g.code; if(g.efrisUom) m.efrisUom=g.efrisUom; if(!m.price&&g.price) m.price=g.price; } else { byName[k]=g; } });
+    _wkCatalog=Object.values(byName);
     wkRebuildDatalist();
   }catch(e){}
 }
@@ -2178,24 +2197,35 @@ function openReceiptUrl(url){
   const old=$('printFrame'); if(old){ try{ old.remove(); }catch(_){} }
   const f=document.createElement('iframe');
   f.id='printFrame';
-  f.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;';
+  // Off-screen but with REAL A4-ish dimensions — a 0x0/hidden iframe has no
+  // layout and prints a blank page. contentWindow.print() prints the full
+  // document regardless of this element's height.
+  f.style.cssText='position:fixed;left:-10000px;top:0;width:794px;height:1123px;border:0;background:#fff;';
   let printed=false;
   const fire=()=>{
     if(printed) return; printed=true;
     try{
       const w=f.contentWindow;
       w.focus();
-      try{ w.addEventListener('afterprint',()=>{ setTimeout(()=>{ try{ f.remove(); }catch(_){} },300); }); }catch(_){}
+      try{ w.addEventListener('afterprint',()=>{ setTimeout(()=>{ try{ f.remove(); }catch(_){} },500); }); }catch(_){}
       w.print();
-      // Fallback cleanup if afterprint never fires
       setTimeout(()=>{ try{ if($('printFrame')) f.remove(); }catch(_){} }, 60000);
     }catch(e){
-      // Cross-origin or sandbox blocked the iframe — fall back to a direct link.
       try{ f.remove(); }catch(_){}
       _printFallbackLink(url);
     }
   };
-  f.onload=()=>setTimeout(fire,150);
+  // Wait until the receipt has actually rendered content before printing —
+  // fixes the "blank page / needs a second click" timing.
+  f.onload=()=>{
+    let tries=0;
+    const ready=()=>{
+      tries++; let ok=false;
+      try{ const doc=f.contentDocument||f.contentWindow.document; const s=doc.getElementById('sheet')||doc.body; ok=!!(s && (s.innerText||'').replace(/\s/g,'').length>20); }catch(_){ ok=true; }
+      if(ok||tries>30){ fire(); } else { setTimeout(ready,100); }
+    };
+    setTimeout(ready,120);
+  };
   document.body.appendChild(f);
   f.src=url;
 }
