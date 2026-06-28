@@ -3613,27 +3613,35 @@ async function gImportManagerItem(idx){
   if(CFG.efrisEnabled===false || alreadyConfigured){ gGoStep(5); }
   else { gGoStep(5); } // Go to step 5 regardless; commodity wizard is accessible via button
   setTimeout(()=>{
+    // Fill from the list item first (always present), then enrich from detail.
     const code=(detail&&detail.code)||i.code||'';
     const name=(detail&&detail.name)||i.name||'';
     const unitName=(detail&&detail.unitName)||i.unitName||'';
-    const price=(detail&&detail.hasSalesUnitPrice)?detail.salesUnitPrice:0;
-    const remarks=(detail&&(detail.defaultLineDescription||detail.description))||'';
+    // Price: prefer detail's sales price, else the list item's price (services
+    // don't expose hasSalesUnitPrice, so don't gate on it).
+    let price=0;
+    if(detail&&detail.salesUnitPrice) price=detail.salesUnitPrice;
+    if(!price&&(i.price||i.salesUnitPrice)) price=i.price||i.salesUnitPrice;
+    const remarks=(detail&&(detail.defaultLineDescription||detail.description))||name||'';
     sv('gFldCode', code);
     sv('gFldName', name);
     sv('gFldUom',  unitName);
-    setTimeout(()=>gAutoEfrisUom(unitName||''),100);
     if(price>0) sv('gFldPrice', String(price));
+    // Currency is required — default to UGX if Manager didn't give one.
+    const curEl=$('gFldCur'); if(curEl && !curEl.value){ curEl.value=(detail&&detail.currency)||'UGX'; }
     if(remarks){ const rEl=$('gFldRemarks'); if(rEl) rEl.value=remarks; }
-    const typeEl=$('gFldType');
-    if(typeEl) typeEl.value=i.type==='Goods'?'Goods':'Service';
+    const typeEl=$('gFldType'); if(typeEl) typeEl.value=i.type==='Goods'?'Goods':'Service';
     if(detail&&detail.division&&$('gFldDivision')) $('gFldDivision').value=detail.division;
     if($('gFldAutoSalesDivision')) $('gFldAutoSalesDivision').checked=!!(detail&&detail.salesDivision&&detail.salesDivision===detail.division);
     if(detail&&detail.costMethod!=null&&$('gFldCostMethod')) $('gFldCostMethod').value=String(detail.costMethod);
     if(detail&&detail.whenSold&&$('gFldWhenSold')) $('gFldWhenSold').value=detail.whenSold;
     if(detail&&detail.whenPurchased&&$('gFldWhenPurchased')) $('gFldWhenPurchased').value=detail.whenPurchased;
     gOnTypeChange();
+    if(unitName) gAutoEfrisUom(unitName);
+    // Make sure the Sync / Register buttons are visible for this imported item.
+    const abc=$('gActionBtnsCard'); if(abc) abc.style.display='';
     window._importedManagerKey=i.key;
-  },50);
+  },60);
   const priceNote=detail&&detail.hasSalesUnitPrice?' · Price: '+(detail.salesUnitPrice||0).toLocaleString():'';
   const efrisOn=CFG.efrisEnabled!==false;
   const nextStep=(efrisOn&&!alreadyConfigured)
