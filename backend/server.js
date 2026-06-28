@@ -2671,6 +2671,16 @@ app.get('/receipt', (req, res) => {
   res.sendFile(path.join(FRONTEND, 'receipt.html'));
 });
 
+// The branded Manager custom-theme HTML, served as plain text so it can be
+// copied and pasted into Manager → Settings → Themes.
+app.get('/branded-theme', (req, res) => {
+  try {
+    const html = fs.readFileSync(path.join(FRONTEND, 'manager-theme.html'), 'utf8');
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.send(html);
+  } catch (e) { res.status(500).send('theme not found'); }
+});
+
 app.get('*', (req, res) => {
   if (!req.path.startsWith('/api/') && req.path !== '/extension') {
     try {
