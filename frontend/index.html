@@ -1660,7 +1660,7 @@ window.__invList=[];
 let _invSearchT=null, _onlyUnsubmitted=false;
 // Debounced server-side search — called as the user types in the picker search box.
 function invSearch(v){ clearTimeout(_invSearchT); _invSearchT=setTimeout(()=>loadList(v),350); }
-function toggleUnsubmitted(cb){ _onlyUnsubmitted=!!cb.checked; loadList(($('pickSearch2')&&$('pickSearch2').value)||($('pickSearch')&&$('pickSearch').value)||''); }
+function toggleUnsubmitted(cb){ _onlyUnsubmitted=!!cb.checked; window.__submittedRefs=null; /* refresh so newly-submitted docs are excluded */ loadList(($('pickSearch2')&&$('pickSearch2').value)||($('pickSearch')&&$('pickSearch').value)||''); }
 async function loadList(term){
   term=(term||'').trim();
   const ep=CFG.managerEndpoint||MGR_EP, tk=CFG.accessToken||MGR_TK;
