@@ -1405,8 +1405,21 @@ app.post('/api/manager/create-receipt', async (req, res) => {
     form.QuantityColumn = true;
     form.UnitPriceColumn = true;
     form.HasLineDescription = true;
+    // Apply the branded theme: API-created receipts don't inherit Manager's "form
+    // default" theme, so copy the CustomTheme from the most recent existing receipt
+    // (the user installs the theme once and sets it on a receipt). Best-effort.
+    try {
+      const rl = await managerCall(ep, accessToken, 'GET', '/receipts?pageSize=1', null);
+      const arr = (rl.data && (rl.data.receipts || rl.data.receiptsAndPayments)) || [];
+      if (arr[0] && (arr[0].key || arr[0].Key)) {
+        const rf = await managerCall(ep, accessToken, 'GET', '/receipt-form/' + (arr[0].key || arr[0].Key), null);
+        const t = rf.data && (rf.data.CustomTheme || rf.data.Theme);
+        if (t) { form.CustomTheme = t; console.log(`   Receipt theme copied from existing receipt: ${t}`); }
+      }
+    } catch (e) { console.log(`   Receipt theme copy skipped: ${e.message}`); }
     form.Lines = await Promise.all((receipt.lines || []).map(async l => {
-      const line = { Qty: parseFloat(l.qty) || 1, UnitPrice: parseFloat(l.unitPrice) || 0 };
+      const price = parseFloat(l.unitPrice) || 0;
+      const line = { Qty: parseFloat(l.qty) || 1, UnitPrice: price, SalesUnitPrice: price };
       let key = l.itemKey;
       // Link the line to the Manager inventory/service item (so stock/books update)
       // by resolving from the code or name when no key was supplied.
@@ -2033,24 +2046,31 @@ app.post('/api/efris/invoices-report', async (req, res) => {
   try {
     const session = await getSession(config.tin, config.deviceNo, config.efrisPassword, eu);
     if (!session.aesKey) throw new Error('No AES key — private key not found or could not decrypt T104 session. Check that backend/data/private_key.pem exists and matches your EFRIS device.');
-    const t144data = {
-      tin: config.tin, startDate, endDate,
+    // T106 = Invoice/Receipt query (by conditions). T144 was being validated as a
+    // GOODS interface by URA (hence "2194 goodsCode cannot be empty"). T106 lists the
+    // taxpayer's issued invoices/receipts in a date range.
+    const t106data = {
+      oriInvoiceNo: '', invoiceNo: '', deviceNo: config.deviceNo || '',
+      buyerTin: buyerTin || '', buyerLegalName: '', buyerNinBrn: '',
+      combineKeywords: '', invoiceType: '', invoiceKind: '', isInvalid: '', isRefund: '',
+      startDate, endDate,
       pageNo: String(pageNo || '1'),
       pageSize: String(Math.min(parseInt(pageSize) || 20, 99)),
-      buyerTin: buyerTin || '', referenceNo: referenceNo || '', buyerLegalName: '',
+      referenceNo: referenceNo || '', branchName: '', queryType: '1',
+      dataSource: '', sellerTinOrNin: config.tin, currencyType: '', invoiceIndustryCode: '',
     };
-    const t144 = await efrisCall(eu, efrisEnvEnc('T144', t144data, config.tin, config.deviceNo, session.aesKey, session.privatePem));
-    const rc = t144.data && t144.data.returnStateInfo ? t144.data.returnStateInfo.returnCode : null;
-    const rm = t144.data && t144.data.returnStateInfo ? t144.data.returnStateInfo.returnMessage : '';
+    const t106 = await efrisCall(eu, efrisEnvEnc('T106', t106data, config.tin, config.deviceNo, session.aesKey, session.privatePem));
+    const rc = t106.data && t106.data.returnStateInfo ? t106.data.returnStateInfo.returnCode : null;
+    const rm = t106.data && t106.data.returnStateInfo ? t106.data.returnStateInfo.returnMessage : '';
     let records = [], page = {};
-    if (t144.data && t144.data.data && t144.data.data.content) {
+    if (t106.data && t106.data.data && t106.data.data.content) {
       try {
-        const s = aesDecryptStr(t144.data.data.content, session.aesKey);
+        const s = aesDecryptStr(t106.data.data.content, session.aesKey);
         const d = JSON.parse(s);
-        records = d.records || d.invoiceList || d.list || [];
+        records = d.records || d.invoiceList || d.list || (Array.isArray(d) ? d : []);
         page = d.page || { pageNo: 1, pageCount: 1, totalSize: records.length };
-        console.log('   T144 report: ' + records.length + ' records');
-      } catch(e) { console.log('   T144 parse error:', e.message); }
+        console.log('   T106 report: ' + records.length + ' records');
+      } catch(e) { console.log('   T106 parse error:', e.message); }
     }
     const ok = rc === '00' || records.length > 0;
     res.json(ok
