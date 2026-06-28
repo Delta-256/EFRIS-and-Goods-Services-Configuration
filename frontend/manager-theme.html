@@ -59,6 +59,7 @@
     main{box-shadow:none;border:none;margin:0;max-width:100%;border-radius:0;}
   }
 </style>
+<!--@QRLIB@--><!-- offline QR encoder injected here when served via /branded-theme -->
 </head>
 <body>
 <main></main>
@@ -169,8 +170,13 @@ function renderDocument(d){
     h+='</div>';
     const qrData = qrF && (qrF.text||'') ? qrF.text : '';
     if(qrData){
-      h+='<div class="qr"><img alt="EFRIS QR" src="https://api.qrserver.com/v1/create-qr-code/?size=160x160&qzone=1&data='+encodeURIComponent(qrData)+'"/>'
-        +'<div class="cap">Scan to verify on URA EFRIS</div></div>';
+      let qrImg='';
+      // Offline QR via the inlined encoder; fall back to an online image, then text.
+      try{
+        if(typeof qrcode!=='undefined'){ const q=qrcode(0,'M'); q.addData(qrData); q.make(); qrImg='<img alt="EFRIS QR" style="width:132px;height:132px;image-rendering:pixelated;" src="'+q.createDataURL(4,8)+'"/>'; }
+      }catch(e){}
+      if(!qrImg) qrImg='<img alt="EFRIS QR" style="width:132px;height:132px;" src="https://api.qrserver.com/v1/create-qr-code/?size=160x160&qzone=1&data='+encodeURIComponent(qrData)+'"/>';
+      h+='<div class="qr">'+qrImg+'<div class="cap">Scan to verify on URA EFRIS</div></div>';
     }
     h+='</div>';
   }

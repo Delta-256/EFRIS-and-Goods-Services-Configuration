@@ -2690,7 +2690,12 @@ app.get('/receipt', (req, res) => {
 // copied and pasted into Manager → Settings → Themes.
 app.get('/branded-theme', (req, res) => {
   try {
-    const html = fs.readFileSync(path.join(FRONTEND, 'manager-theme.html'), 'utf8');
+    let html = fs.readFileSync(path.join(FRONTEND, 'manager-theme.html'), 'utf8');
+    // Inline the offline QR encoder so the theme is fully self-contained.
+    try {
+      const lib = fs.readFileSync(path.join(FRONTEND, 'qrcode.lib.js'), 'utf8');
+      html = html.replace('<!--@QRLIB@-->', '<script>\n' + lib + '\n</script>');
+    } catch (_) {}
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.send(html);
   } catch (e) { res.status(500).send('theme not found'); }
