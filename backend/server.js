@@ -1400,6 +1400,17 @@ app.get('/api/goods/manager-item-detail', async (req, res) => {
     const cf2 = d.customFields2 || d.CustomFields2 || {};
     const cfStrings = cf2.strings || cf2.Strings || {};
     console.log(`   Detail for ${key}:`, JSON.stringify(d).slice(0, 300));
+    // Pull the stored EFRIS Commodity Code + Category Path (written at sync time)
+    // so an already-configured item imports without re-picking the category.
+    let comCode = '', catPath = '';
+    try {
+      const cf = await mgrTextCustomFields(ep, tk);
+      const find = (...names) => { for (const n of names) { const k = cf.byName && cf.byName[n]; if (k) return k; } return null; };
+      const comKey = find('EFRIS Commodity Code', 'Commodity Code', 'EFRIS Commodity', 'Commodity');
+      const catKey = find('EFRIS Category Path', 'Category Path', 'Segment / Class Grouping', 'Class Grouping', 'EFRIS Segment / Class Grouping');
+      if (comKey && cfStrings[comKey]) comCode = String(cfStrings[comKey]);
+      if (catKey && cfStrings[catKey]) catPath = String(cfStrings[catKey]);
+    } catch (_) {}
     // Field names differ between inventory items (ItemName, DefaultSalesUnitPrice,
     // HasDefaultSalesUnitPrice, no Code) and non-inventory items (Name, SalesUnitPrice,
     // HasSalesUnitPrice). Read every variant so both populate the form correctly.
@@ -1419,6 +1430,7 @@ app.get('/api/goods/manager-item-detail', async (req, res) => {
       costMethod:             d.costMethod != null ? d.costMethod : (d.CostMethod != null ? d.CostMethod : ''),
       whenSold:               d.whenSold || d.WhenSold || '',
       whenPurchased:          d.whenPurchased || d.WhenPurchased || '',
+      comCode, catPath,
     }});
   } catch(e) {
     res.json({ success: false, error: e.message });

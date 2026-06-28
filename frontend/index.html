@@ -2961,10 +2961,17 @@ function gOnComChange(){
 }
 
 function gBuildDetailsSummary(){
-  const el=$('gComSummary');
+  const el=$('gComSummary'); if(!el) return;
+  // gCOM may be null for an imported item with no commodity code yet — don't crash.
+  if(!gCOM){
+    el.innerHTML='<span class="g-sel-name" style="color:var(--gray);">No commodity category yet — use “Choose / change EFRIS commodity category”.</span>';
+    const g=$('gFldGrouping'); if(g) g.value='';
+    const c=$('gFldComCode'); if(c) c.value='';
+    return;
+  }
   el.innerHTML='<span class="g-sel-code">('+esc(gCOM.k)+')</span><span class="g-sel-name">'+esc(gCOM.n)+'</span>';
-  $('gFldGrouping').value=(gSEG?gSEG.n:'')+' >> '+(gFAM?gFAM.n:'')+' >> '+(gCLS?gCLS.n:'');
-  $('gFldComCode').value=gCOM.k;
+  const g=$('gFldGrouping'); if(g) g.value=(gSEG?gSEG.n:'')+' >> '+(gFAM?gFAM.n:'')+' >> '+(gCLS?gCLS.n:'');
+  const c=$('gFldComCode'); if(c) c.value=gCOM.k;
 }
 
 function gUomInput(v){
@@ -3602,9 +3609,17 @@ async function gImportManagerItem(idx){
     (x.code&&i.code&&x.code.toLowerCase()===i.code.toLowerCase())||
     (x.name&&i.name&&x.name.toLowerCase()===i.name.toLowerCase())
   );
-  const alreadyConfigured = !!(existingItem&&existingItem.comCode);
-  if(alreadyConfigured && existingItem){
-    if(existingItem.comCode) gCOM={k:existingItem.comCode, n:existingItem.comName||''};
+  // Prefer the EFRIS commodity code/path stored in Manager (from a prior sync);
+  // fall back to a locally-configured copy. Either way, a configured item won't
+  // need the category re-picked — only items lacking a code do.
+  let comFromMgr = detail && detail.comCode ? detail.comCode : '';
+  let pathFromMgr = detail && detail.catPath ? detail.catPath : '';
+  const alreadyConfigured = !!(comFromMgr || (existingItem&&existingItem.comCode));
+  if(comFromMgr){
+    gCOM={k:comFromMgr, n:''};
+    if(pathFromMgr){ const p=pathFromMgr.split('>>').map(s=>s.trim()); gSEG={k:'',n:p[0]||''}; gFAM={k:'',n:p[1]||''}; gCLS={k:'',n:p[2]||''}; }
+  } else if(existingItem && existingItem.comCode){
+    gCOM={k:existingItem.comCode, n:existingItem.comName||''};
     if(existingItem.segCode) gSEG={k:existingItem.segCode, n:existingItem.segment||''};
     if(existingItem.famCode) gFAM={k:existingItem.famCode, n:existingItem.family||''};
     if(existingItem.clsCode) gCLS={k:existingItem.clsCode, n:existingItem.cls||''};
