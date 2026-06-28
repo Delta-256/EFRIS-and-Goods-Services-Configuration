@@ -1649,7 +1649,7 @@ app.post('/api/efris/submit-invoice', rateLimit(30), async (req, res) => {
       try { contentStr = aesDecryptStr(t109.data.data.content, session.aesKey); }
       catch(e) { try { contentStr = Buffer.from(t109.data.data.content, 'base64').toString('utf8'); } catch(_) {} }
     }
-    let fdn = null, qrCode = null, antifakeCode = null, invoiceId = '';
+    let fdn = null, qrCode = null, antifakeCode = null, invoiceId = '', validationUrl = null;
     try {
       if (contentStr) {
         const d = JSON.parse(contentStr);
@@ -1665,7 +1665,7 @@ app.post('/api/efris/submit-invoice', rateLimit(30), async (req, res) => {
         const efrisPortal = config.mode === 'production'
           ? 'https://efris.ura.go.ug/site_mobile/#/invoiceValidation'
           : 'https://efristest.ura.go.ug/site_new/#/invoiceValidation';
-        const validationUrl = (fdn && antifakeCode)
+        validationUrl = (fdn && antifakeCode)
           ? `${efrisPortal}?invoiceNo=${encodeURIComponent(fdn)}&antiFakeCode=${encodeURIComponent(antifakeCode)}`
           : null;
         // Prefer EFRIS-returned QR (base64 image), fall back to validation URL, then antifakeCode
