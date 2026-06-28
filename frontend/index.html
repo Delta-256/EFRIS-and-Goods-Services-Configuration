@@ -4324,8 +4324,8 @@ async function stkSubmitIn(){
     }
     const d=await r.json();
     if(d.success){
-      ht('stkInResult','<div class="st ss">&#10003; Stock recorded in EFRIS'+(d.partialErrors&&d.partialErrors.length?' ('+d.partialErrors.length+' item error(s))':'')+'</div>');
-      mirrorStockToManager('in',items,gvi('stkDate'),'stkInResult');
+      ht('stkInResult','<div class="st ss">&#10003; Stock recorded in EFRIS'+(d.partialErrors&&d.partialErrors.length?' ('+d.partialErrors.length+' item error(s))':'')+'</div>'
+        +'<div class="al ai" style="font-size:11px;margin-top:4px;">To also update Manager’s inventory quantity, click <strong>📦 Submit Stock-in to Manager</strong> above.</div>');
     }
     else ht('stkInResult','<div class="st se">&#10005; '+esc(d.error||'Failed')+(d.partialErrors&&d.partialErrors.length?'<br>'+d.partialErrors.map(e=>esc(e.itemCode+': '+e.returnMessage)).join('<br>'):'')+'</div>');
   }catch(e){ht('stkInResult','<div class="st se">'+esc(e.message)+'</div>');}
@@ -4389,7 +4389,6 @@ async function stkSubmitAdj(){
     const d=await r.json();
     if(d.success){
       ht('stkAdjResult','<div class="st ss">&#10003; Stock adjustment recorded in EFRIS</div>');
-      mirrorStockToManager('out',items,gvi('stkAdjDate'),'stkAdjResult');
     }
     else ht('stkAdjResult','<div class="st se">&#10005; '+esc(d.error||'Failed')+'</div>');
   }catch(e){ht('stkAdjResult','<div class="st se">'+esc(e.message)+'</div>');}

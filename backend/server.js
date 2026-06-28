@@ -2118,6 +2118,38 @@ app.post('/api/efris/dictionary-dump', async (req, res) => {
   } catch (e) { res.json({ success: false, error: e.message }); }
 });
 
+// Force-clean a broken inventory item (e.g. one whose form 404s because a bad
+// starting-balance write corrupted it). Resolves the key by code, then deletes
+// its starting balance and the item itself, reporting each step.
+app.post('/api/manager/cleanup-item', async (req, res) => {
+  const { managerEndpoint, accessToken, code } = req.body || {};
+  const ep = normEp(managerEndpoint || ''), tk = accessToken;
+  if (!ep || !tk || !code) return res.status(400).json({ success: false, error: 'managerEndpoint, accessToken and code are required' });
+  const want = String(code).trim().toLowerCase();
+  const codeOf = i => String(i.code || i.Code || i.ItemCode || i.itemCode || '').trim().toLowerCase();
+  const steps = [];
+  try {
+    // find the key in inventory + non-inventory lists
+    let key = null, base = null;
+    for (const [path, prop, fb] of [['/inventory-items', 'inventoryItems', '/inventory-item-form'], ['/non-inventory-items', 'nonInventoryItems', '/non-inventory-item-form']]) {
+      try {
+        const r = await managerCall(ep, tk, 'GET', path, null);
+        const arr = (r.data && (r.data[prop] || [])) || [];
+        const hit = arr.find(i => codeOf(i) === want);
+        if (hit) { key = hit.key || hit.Key; base = fb; steps.push(`found in ${path} → key ${key}`); break; }
+      } catch (e) { steps.push(`${path}: ${e.message}`); }
+    }
+    if (!key) return res.json({ success: false, error: 'Item not found in any Manager list', steps });
+    // 1) delete starting balance (the likely corrupter)
+    try { const r = await managerCall(ep, tk, 'DELETE', '/inventory-item-starting-balance-form/' + key, null); steps.push(`DELETE starting-balance → HTTP ${r.status}`); } catch (e) { steps.push('starting-balance del err: ' + e.message); }
+    // 2) delete the item itself
+    let delStatus = null;
+    try { const r = await managerCall(ep, tk, 'DELETE', base + '/' + key, null); delStatus = r.status; steps.push(`DELETE ${base} → HTTP ${r.status}`); } catch (e) { steps.push('item del err: ' + e.message); }
+    const ok = delStatus != null && delStatus >= 200 && delStatus < 400;
+    res.json({ success: ok, key, steps });
+  } catch (e) { res.status(500).json({ success: false, error: e.message, steps }); }
+});
+
 // Diagnostic: find which inventory-adjustment form endpoints exist in this
 // Manager build (GET-probe — non-destructive). 404 = absent, 200/405 = present.
 app.get('/api/manager/probe-inventory-forms', async (req, res) => {
