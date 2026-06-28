@@ -981,10 +981,11 @@ app.get('/api/goods/manager-items', async (req, res) => {
   const { ep, tk } = mgrCreds(req);
   if (!ep || !tk) return res.status(400).json({ success: false, error: 'ep and tk required' });
   try {
-    const cols = '?fields=ItemCode&fields=ItemName&fields=SalePrice&fields=UnitName';
+    // No ?fields filter — in this Manager build that filter omits key/code, which
+    // breaks the import picker (needs key) and item matching (needs code).
     const [niR, invR] = await Promise.all([
-      managerCall(ep, tk, 'GET', '/non-inventory-items' + cols, null),
-      managerCall(ep, tk, 'GET', '/inventory-items' + cols, null)
+      managerCall(ep, tk, 'GET', '/non-inventory-items', null),
+      managerCall(ep, tk, 'GET', '/inventory-items', null)
     ]);
     const services = (niR.status === 200 && niR.data && (niR.data.nonInventoryItems || niR.data.NonInventoryItems)) || [];
     const goods    = (invR.status === 200 && invR.data && (invR.data.inventoryItems || invR.data.InventoryItems)) || [];
