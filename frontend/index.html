@@ -1713,7 +1713,7 @@ function buildInv(opts){
   if(t==='b2b'){custTIN=gvi('cTIN')||(inv.CustomFields&&inv.CustomFields['Customer TIN'])||'';}
   else if(t==='b2g'){custTIN=gvi('cGovTIN');custDept=gvi('cGovDept');if(custDept&&!custName)custName=custDept;}
   else if(t==='foreign'){passportNum=gvi('cPassport');nationality=gvi('cNationality');const fn2=gvi('cForeignName');if(fn2)custName=fn2;}
-  return{ Reference:inv.Reference||inv.Code||'INV-001', IssueDate:inv.IssueDate||inv.Date||new Date().toISOString().slice(0,10),
+  return{ Reference:(window._subRefOverride)||inv.Reference||inv.Code||'INV-001', IssueDate:inv.IssueDate||inv.Date||new Date().toISOString().slice(0,10),
     CustomerType:t, CustomerName:custName, CustomerTIN:custTIN, CustomerDept:custDept,
     PassportNum:passportNum, Nationality:nationality,
     CustomerAddress:(inv.Customer&&inv.Customer.Address)||'', Currency:inv.Currency||'UGX', ExchangeRate:fx,
@@ -1733,8 +1733,31 @@ function setProg(steps){
   ht('subProg','<div class="pl">'+steps.map(s=>'<div class="ps '+s.st+'"><div class="pd">'+icons[s.st]+'</div><div>'+s.tx+'</div></div>').join('')+'</div>');
 }
 
-async function doSubmit(){
+// Submit with a fresh, unique reference (used when the original was already
+// submitted and the user chooses to renumber).
+function doSubmitAsNew(){
+  const base=((INV&&(INV.Reference||INV.Code))||'INV')+'';
+  const newRef=base.replace(/-R\d+$/,'')+'-R'+String(Date.now()).slice(-4);
+  doSubmit({skipDupCheck:true,newRef:newRef});
+}
+async function doSubmit(opts){
+  opts=opts||{};
   if(!CFG.tin){alert('Complete setup in Settings first');return;}
+  // Duplicate-reference guard: warn if this invoice's reference was already
+  // submitted to EFRIS, and let the user choose to renumber or proceed.
+  if(!opts.skipDupCheck && INV){
+    const ref=((INV.Reference||INV.Code||'')+'').toLowerCase().trim();
+    if(ref){
+      if(!window.__submittedRefs){ try{ await loadSubmittedRefs(); }catch(_){ } }
+      if(window.__submittedRefs && window.__submittedRefs[ref]){
+        ht('subProg','<div class="al aw">&#9888; Reference <strong>'+esc(INV.Reference||INV.Code||'')+'</strong> was already submitted to EFRIS.<br>'
+          +'<button class="btn bsm" style="margin-top:6px;" onclick="doSubmitAsNew()">Submit as NEW number</button> '
+          +'<button class="btn bo bsm" style="margin-top:6px;" onclick="doSubmit({skipDupCheck:true})">Submit anyway (same number)</button></div>');
+        return;
+      }
+    }
+  }
+  window._subRefOverride = opts.newRef || '';
   const btn=$('btnSub'); btn.disabled=true; btn.innerHTML='<span class="sp">⏳</span> Submitting…';
   hd('rCard');hd('errCard');
   const steps=[{tx:'Connecting to EFRIS relay',st:'act'},{tx:'Authenticating with URA',st:'pnd'},{tx:'Building &amp; encrypting payload',st:'pnd'},{tx:'Submitting to URA EFRIS',st:'pnd'},{tx:'Saving FDN to Manager.io',st:'pnd'}];
@@ -2139,7 +2162,7 @@ async function wkRecordInManager(inv,d){
   const src=(inv&&inv._lines&&inv._lines.length)?inv._lines:_wkLines;
   const lines=(src||[]).filter(l=>(l.desc||'').trim()).map(l=>({itemCode:l.itemCode||'',itemName:l.desc||'',description:l.desc||'',qty:parseFloat(l.qty)||1,unitPrice:parseFloat(l.price)||0}));
   if(!lines.length) return;
-  const cr=await fetch(RELAY+'/api/manager/create-receipt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({managerEndpoint:ep,accessToken:tk,receipt:{date:(inv.IssueDate||new Date().toISOString().slice(0,10)),reference:inv.Reference||'',lines,description:'EFRIS e-Receipt — FDN '+(d.fdn||'')}})});
+  const cr=await fetch(RELAY+'/api/manager/create-receipt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({managerEndpoint:ep,accessToken:tk,receipt:{date:(inv.IssueDate||new Date().toISOString().slice(0,10)),reference:inv.Reference||'',currency:inv._currency||'UGX',lines,description:'EFRIS e-Receipt — FDN '+(d.fdn||'')}})});
   const cd=await cr.json();
   const v=$('wkRVerify');
   if(cd.success&&cd.key){

@@ -1218,9 +1218,20 @@ app.post('/api/manager/create-receipt', async (req, res) => {
     let receivedIn = receipt.receivedIn || '';
     if (!receivedIn) {
       try {
+        const want = String(receipt.currency || 'UGX').toUpperCase();
         const bankR = await managerCall(ep, accessToken, 'GET', '/bank-and-cash-accounts', null);
         const arr = (bankR.data && (bankR.data.bankAndCashAccounts || bankR.data.BankAndCashAccounts)) || [];
-        if (arr.length) receivedIn = arr[0].key || arr[0].Key || '';
+        const accCur = a => String(a.currency || a.Currency || a.foreignCurrency || a.ForeignCurrency || '').toUpperCase();
+        const nm = a => String(a.name || a.Name || '');
+        // Match the receipt currency: an account in that currency; for UGX (base)
+        // prefer one with no foreign currency set / no foreign code in its name.
+        const pick =
+          arr.find(a => accCur(a) === want) ||
+          (want === 'UGX' ? arr.find(a => !accCur(a) && !/eur|usd|gbp|kes|tzs|rwf|euro|dollar|pound/i.test(nm(a))) : null) ||
+          (want === 'UGX' ? arr.find(a => !accCur(a)) : null) ||
+          arr.find(a => !/eur|usd|gbp|kes|tzs|rwf|euro|dollar|pound/i.test(nm(a))) ||
+          arr[0];
+        if (pick) receivedIn = pick.key || pick.Key || '';
       } catch(_) {}
     }
     const form = {};
@@ -2183,6 +2194,39 @@ app.get('/api/manager/sb-sample', async (req, res) => {
   try {
     const g = await managerCall(ep, tk, 'GET', '/inventory-item-starting-balance-form/' + key, null);
     res.json({ success: g.status === 200, status: g.status, key, form: g.data });
+  } catch (e) { res.json({ success: false, error: e.message }); }
+});
+
+// Diagnostic: read the latest receipt's full form so we learn the payer fields
+// (Contact/Payer) and the custom-field structure (dropdowns etc.).
+app.get('/api/manager/receipt-sample', async (req, res) => {
+  const { ep, tk } = mgrCreds(req);
+  if (!ep || !tk) return res.status(400).json({ success: false, error: 'ep, tk required' });
+  try {
+    const list = await managerCall(ep, tk, 'GET', '/receipts', null);
+    const arr = (list.data && (list.data.receipts || list.data.receiptsAndPayments || list.data.Receipts || [])) || [];
+    if (!arr.length) return res.json({ success: false, error: 'No receipts found', listKeys: Object.keys(list.data || {}) });
+    const key = arr[0].key || arr[0].Key;
+    const f = await managerCall(ep, tk, 'GET', '/receipt-form/' + key, null);
+    res.json({ success: f.status === 200, status: f.status, key, form: f.data, formKeys: Object.keys(f.data || {}) });
+  } catch (e) { res.json({ success: false, error: e.message }); }
+});
+
+// Diagnostic: list custom themes + read one form, so we learn the theme shape
+// (name + Liquid/HTML body field) to create a branded default theme.
+app.get('/api/manager/theme-sample', async (req, res) => {
+  const { ep, tk } = mgrCreds(req);
+  if (!ep || !tk) return res.status(400).json({ success: false, error: 'ep, tk required' });
+  try {
+    const list = await managerCall(ep, tk, 'GET', '/custom-themes', null);
+    const arr = (list.data && (list.data.customThemes || list.data.CustomThemes || [])) || [];
+    const out = { success: true, count: arr.length, listKeys: Object.keys(list.data || {}), themes: arr.map(t => ({ key: t.key || t.Key, name: t.name || t.Name })) };
+    if (arr.length) {
+      const key = arr[0].key || arr[0].Key;
+      const f = await managerCall(ep, tk, 'GET', '/custom-theme-form/' + key, null);
+      out.sampleKey = key; out.form = f.data; out.formKeys = Object.keys(f.data || {});
+    }
+    res.json(out);
   } catch (e) { res.json({ success: false, error: e.message }); }
 });
 
