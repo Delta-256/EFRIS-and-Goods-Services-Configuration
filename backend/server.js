@@ -2134,14 +2134,9 @@ app.post('/api/efris/dictionary-dump', async (req, res) => {
 // exact field shape (after the user sets one manually in Manager's UI).
 app.get('/api/manager/sb-sample', async (req, res) => {
   const { ep, tk } = mgrCreds(req);
-  if (!ep || !tk) return res.status(400).json({ success: false, error: 'ep, tk required' });
+  const key = (req.query.key || '').trim();
+  if (!ep || !tk || !key) return res.status(400).json({ success: false, error: 'ep, tk, key required (the starting-balance record key)' });
   try {
-    // Starting balances are their own records (keyed independently of the item),
-    // so read from the list rather than by item key.
-    const list = await managerCall(ep, tk, 'GET', '/inventory-item-starting-balances', null);
-    const arr = (list.data && (list.data.inventoryItemStartingBalances || list.data.InventoryItemStartingBalances || [])) || [];
-    if (!arr.length) return res.json({ success: false, error: 'No starting balances found', listKeys: Object.keys(list.data || {}) });
-    const key = arr[0].key || arr[0].Key;
     const g = await managerCall(ep, tk, 'GET', '/inventory-item-starting-balance-form/' + key, null);
     res.json({ success: g.status === 200, status: g.status, key, form: g.data });
   } catch (e) { res.json({ success: false, error: e.message }); }
