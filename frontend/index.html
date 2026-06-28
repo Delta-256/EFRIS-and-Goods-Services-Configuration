@@ -1578,7 +1578,12 @@ async function loadInv(key){
     const d=await r.json();
     if(!d.success)throw new Error(d.error||'Failed to load invoice');
     INV=d.data; renderInv(INV); showScr('sMain');
-  }catch(e){console.warn('Invoice load failed:',e.message);showScr('sMain');showT('tHome',$('tabHome'));homeInit();}
+  }catch(e){
+    // Stay on the Submit tab and surface the error instead of bouncing to Home.
+    console.warn('Invoice load failed:',e.message); showScr('sMain');
+    try{ showT('tSub',$('tabSub')); }catch(_){}
+    alert('Could not load that document: '+e.message);
+  }
 }
 
 function renderInv(inv){
@@ -1679,7 +1684,7 @@ async function loadList(term){
     if($('pickList2')) $('pickList2').innerHTML=h;
   }catch(e){ target.innerHTML='<div class="al aw">Network error: '+e.message+'</div>'; }
 }
-function pick(idx){ var i=window.__invList[idx]; if(i){ hidSubPicker(); DKEY=i.key; _lastInvKey=i.key; loadInv(i.key); } }
+function pick(idx){ var i=window.__invList[idx]; if(i){ hidSubPicker(); DKEY=i.key; _lastInvKey=i.key; showT('tSub',$('tabSub')); loadInv(i.key); } }
 // Build a set of references already submitted to EFRIS (from this tool's log) so the
 // "unsubmitted only" filter can hide them.
 async function loadSubmittedRefs(){
@@ -1790,6 +1795,11 @@ async function doSubmit(opts){
     steps[4].st='don';setProg(steps);
   }catch(err){
     console.error(err); showErr(err.message);
+    // If EFRIS rejected it as a duplicate / already-used number, offer to resubmit
+    // under a fresh reference.
+    if(/already|duplicate|exist|repeat|been submitted|same invoice/i.test(err.message||'')){
+      const em=$('errMsg'); if(em) em.innerHTML+='<br><button class="btn bsm" style="margin-top:6px;" onclick="doSubmitAsNew()">&#8635; Submit as NEW number</button>';
+    }
     steps.forEach(s=>{if(s.st==='act')s.st='err';});setProg(steps);
   }
   btn.disabled=false;btn.innerHTML='📤 Submit to URA EFRIS';
