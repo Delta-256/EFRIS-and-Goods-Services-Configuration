@@ -206,6 +206,7 @@
     <button class="tab efris-only" id="tabStat" onclick="showT('tStat',this)"><span class="ico-emoji">&#128203;</span><svg class="ico-svg" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg> Status</button>
     <button class="tab" id="tabGds" onclick="showT('tGds',this);stkInit()"><span class="ico-emoji">&#128230;</span><svg class="ico-svg" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="16.5" y1="9.4" x2="7.5" y2="4.21"/><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg> Goods</button>
     <button class="tab efris-only" id="tabBulk" onclick="showT('tBulk',this)"><span class="ico-emoji">&#9654;</span><svg class="ico-svg" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg> Bulk</button>
+    <button class="tab efris-only" id="tabCN" onclick="showT('tCN',this);cnTabInit()"><span class="ico-emoji">&#8629;</span><svg class="ico-svg" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg> Credit Note</button>
     <button class="tab efris-only" id="tabHist" onclick="showT('tHist',this);histLoad(1)"><span class="ico-emoji">&#128203;</span><svg class="ico-svg" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="12 8 12 12 14 14"/><path d="M3.05 11a9 9 0 1 0 .5-4"/><polyline points="3 3 3 7 7 7"/></svg> History</button>
     <button class="tab" id="tabNum" onclick="showT('tNum',this);numLoad()"><span class="ico-emoji">&#128290;</span><svg class="ico-svg" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/><line x1="10" y1="3" x2="8" y2="21"/><line x1="16" y1="3" x2="14" y2="21"/></svg> Numbers</button>
     <button class="tab" onclick="showT('tGd',this)"><span class="ico-emoji">&#10067;</span><svg class="ico-svg" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg> Guide</button>
@@ -343,42 +344,10 @@
       </div>
       <div id="subDone" class="hidden">
         <div class="al as">&#10003; Already submitted &mdash; FDN: <strong id="exFDN"></strong>
-          <button type="button" class="btn bo bsm" onclick="openCreditNoteModal()" style="margin-left:10px;background:#c62828;color:#fff;border-color:#c62828;">&#8617; Issue Credit Note</button>
+          <button type="button" class="btn bo bsm" onclick="openCreditNoteModal($('exFDN').textContent.trim())" style="margin-left:10px;background:#c62828;color:#fff;border-color:#c62828;">&#8617; Issue Credit Note</button>
         </div>
       </div>
 
-      <!-- Credit Note Modal -->
-      <div id="cnModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.45);z-index:999;overflow-y:auto;">
-        <div style="background:#fff;border-radius:10px;max-width:420px;margin:40px auto;padding:20px;box-shadow:0 4px 24px rgba(0,0,0,.3);">
-          <div style="font-weight:700;font-size:15px;margin-bottom:12px;color:#c62828;">&#8617; Issue Credit Note</div>
-          <div style="font-size:12px;color:var(--gray);margin-bottom:12px;">Original FDN: <strong id="cnOrigFDN"></strong></div>
-          <div class="fg">
-            <label>Reason for Credit Note *</label>
-            <select id="cnReasonCode" onchange="updateCnReason()" style="margin-bottom:6px;">
-              <option value="">— Select reason —</option>
-              <option value="Goods returned by customer">Goods returned by customer</option>
-              <option value="Overcharge on original invoice">Overcharge on original invoice</option>
-              <option value="Wrong item supplied">Wrong item supplied</option>
-              <option value="Invoice issued in error">Invoice issued in error</option>
-              <option value="Cancelled order">Cancelled order</option>
-              <option value="Partial cancellation">Partial cancellation</option>
-              <option value="Other">Other (specify below)</option>
-            </select>
-            <input id="cnReasonDetail" placeholder="Additional details or specify reason…" style="font-size:12px;"/>
-          </div>
-          <div class="fg" style="margin-top:8px;">
-            <label>Original Invoice Reference</label>
-            <input id="cnOrigRef" readonly style="background:#f9f9f9;color:var(--gray);font-size:12px;"/>
-          </div>
-          <div style="font-size:11px;color:#666;margin:8px 0;padding:8px;background:#fff8e1;border-radius:5px;border-left:3px solid #f9a825;">
-            This will create a credit note on URA EFRIS cancelling the original e-Receipt, and record it in Manager.io for the tax official to review.
-          </div>
-          <div style="display:flex;gap:8px;margin-top:12px;">
-            <button class="btn bo" style="flex:1;" onclick="closeCnModal()">Cancel</button>
-            <button class="btn" style="flex:2;background:#c62828;color:#fff;border-color:#c62828;" onclick="doCreditNote()">Issue Credit Note</button>
-          </div>
-        </div>
-      </div>
       <div class="fg mt">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
           <label style="margin:0;">Payment Ways</label>
@@ -404,7 +373,7 @@
       <div id="mgrSave"></div>
       <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">
         <button class="btn" style="flex:1;background:#1b4332;color:#fff;border-color:#1b4332;font-size:12px;" onclick="openReceipt()">&#128438; Print Receipt / PDF</button>
-        <button class="btn bo bsm efris-only" onclick="openCreditNoteModal()" style="font-size:11px;flex:0 0 auto;">&#8629; Credit Note</button>
+        <button class="btn bo bsm efris-only" onclick="openCreditNoteModal((($('rFDN')||{}).textContent||'').replace(/CREDIT NOTE/i,'').trim())" style="font-size:11px;flex:0 0 auto;">&#8629; Credit Note</button>
       </div>
       </div>
     </div>
@@ -747,6 +716,22 @@
           </table>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- ══ CREDIT NOTE TAB ══ -->
+  <div id="tCN" class="hidden">
+    <div class="card">
+      <div class="ct">&#8629; Issue a Credit Note by FDN</div>
+      <p style="font-size:12px;color:var(--gray);margin:0 0 12px;">Credit an e-Invoice or e-Receipt that was already submitted to EFRIS. Enter its Fiscal Document Number (FDN), look it up to fetch the original invoice ID, then review the lines and submit. The credit note is filed in the URA <strong>Credit Notes</strong> register (status <em>Pending</em> until URA approves).</p>
+      <div class="g2">
+        <div class="fg"><label>Original FDN *</label><input id="cnTabFdn" placeholder="e.g. 325043866486" style="font-family:monospace;"/></div>
+        <div class="fg" style="display:flex;align-items:flex-end;"><button class="btn bg" style="width:100%;" onclick="cnTabLookup()">&#128269; Look up original</button></div>
+      </div>
+      <div id="cnTabInfo" style="font-size:12px;margin:4px 0;"></div>
+      <div class="fg"><label>Original Invoice ID (oriInvoiceId) *</label><input id="cnTabOriId" placeholder="auto-filled by lookup, or enter manually"/>
+        <div class="hint">Found in the History tab's <strong>Invoice ID</strong> column, or the Manager <strong>Invoice ID</strong> custom field on the original document.</div></div>
+      <button class="btn" style="background:#c62828;color:#fff;border-color:#c62828;margin-top:6px;" onclick="cnTabContinue()">Continue to credit note form &rarr;</button>
     </div>
   </div>
 
@@ -1255,7 +1240,7 @@ function showScr(id){ document.querySelectorAll('.scr').forEach(e=>e.classList.r
   try{ const f=document.querySelector('.ftr'); if(f) f.style.display = (id==='sCreate')?'none':''; }catch(_){}
 }
 function showT(id,btn){
-  ['tHome','tWalk','tSub','tStat','tGds','tGd','tNum','tHist','tBulk','tSet'].forEach(t=>{const e=$(t);if(e)e.classList.add('hidden');});
+  ['tHome','tWalk','tSub','tStat','tGds','tGd','tNum','tHist','tBulk','tCN','tSet'].forEach(t=>{const e=$(t);if(e)e.classList.add('hidden');});
   document.querySelectorAll('.tab').forEach(b=>b.classList.remove('on'));
   const e=$(id);if(e)e.classList.remove('hidden');
   if(btn)btn.classList.add('on');
@@ -2697,71 +2682,8 @@ function showErr(msg){
 function retry(){hd('errCard');doSubmit();}
 
 // ── Credit Note ───────────────────────────────────────────────
-function openCreditNoteModal(){
-  if(!INV){alert('No invoice loaded');return;}
-  const fdn=$('exFDN')?$('exFDN').textContent.trim():'';
-  if(!fdn){alert('No FDN found — this receipt has not been submitted to EFRIS yet');return;}
-  ht('cnOrigFDN',fdn);
-  sv('cnReasonCode',''); sv('cnReasonDetail','');
-  sv('cnOrigRef',INV.Reference||INV.Code||'');
-  $('cnModal').style.display='';
-}
-function closeCnModal(){ $('cnModal').style.display='none'; }
-function updateCnReason(){
-  const v=gvi('cnReasonCode');
-  if(v==='Other') $('cnReasonDetail').placeholder='Please describe the reason…';
-  else $('cnReasonDetail').placeholder='Additional details (optional)…';
-}
-async function doCreditNote(){
-  const fdn=$('exFDN')?$('exFDN').textContent.trim():'';
-  const reasonCode=gvi('cnReasonCode');
-  const reasonDetail=(gvi('cnReasonDetail')||'').trim();
-  if(!reasonCode){alert('Please select a reason for the credit note');return;}
-  const reason=reasonCode+(reasonDetail?' — '+reasonDetail:'');
-  closeCnModal();
-  const btn=$('btnSub'); btn.disabled=true;
-  hd('rCard');hd('errCard');
-  const steps=[
-    {tx:'Submitting credit note to URA EFRIS',st:'act'},
-    {tx:'Creating credit note in Manager.io',st:'pnd'},
-    {tx:'Saving FDN to Manager.io',st:'pnd'}
-  ];
-  setProg(steps);
-  try{
-    // Step 1: Submit credit note to EFRIS
-    const inv=buildInv({isRefund:true,originalFDN:fdn,creditNoteReason:reason});
-    const r1=await fetch(RELAY+'/api/efris/submit-invoice',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({invoice:inv,config:{tin:CFG.tin,deviceNo:CFG.deviceNo,efrisPassword:CFG.efrisPassword,mode:CFG.sandbox?'sandbox':'production',businessName:CFG.legalName,tradeName:CFG.tradeName,businessAddress:CFG.address,brn:CFG.brn,phone:CFG.phone,email:CFG.email,vatRegistered:CFG.vatReg}})});
-    const d1=await r1.json();
-    if(!d1.success)throw new Error(d1.error||'Credit note submission failed');
-    steps[0].st='don'; steps[1].st='act'; setProg(steps);
-    sh('rCard');
-    ht('rFDN','<span style="color:#c62828;">&#8617; CREDIT NOTE</span> '+esc(d1.fdn||'—'));
-    tx('rAF',d1.antifakeCode||'—');
-    ht('rQR',d1.qrCode?'<img src="'+esc(d1.qrCode)+'" alt="QR Code" style="width:100px;height:100px;margin-top:4px;" onerror="this.style.display=\'none\'"/>':'');
-    ht('rVerifyLink',d1.validationUrl?'<a href="'+esc(d1.validationUrl)+'" target="_blank" rel="noopener" style="font-size:11px;color:#1565c0;">&#128279; Verify Credit Note on URA EFRIS Portal</a>':'');
-    // Step 2: Create credit note record in Manager
-    const ep=CFG.managerEndpoint||MGR_EP, tk=CFG.accessToken||MGR_TK;
-    let cnKey=null;
-    if(ep&&tk&&DKEY){
-      try{
-        const cr=await fetch(RELAY+'/api/manager/create-credit-note',{method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({managerEndpoint:ep,accessToken:tk,originalKey:DKEY,reason,efrisFdn:d1.fdn,efrisInvoiceId:d1.invoiceId||'',efrisAntifake:d1.antifakeCode||'',efrisQr:(d1.validationUrl||d1.qrCode||''),efrisSubDate:(d1.issuedDate||'').slice(0,10)})});
-        const cd=await cr.json();
-        cnKey=cd.key;
-        if(cd.success) ht('mgrSave','<div class="st ss">&#10003; Credit note created in Manager (ref: CN-'+esc(INV.Reference||'')+')</div>');
-        else ht('mgrSave','<div class="al ai">&#9888; Manager credit note skipped: '+esc(cd.error||'unknown')+'</div>');
-      }catch(e){ ht('mgrSave','<div class="al ai">&#9888; Manager credit note: network error</div>'); }
-    }
-    steps[1].st='don'; steps[2].st='act'; setProg(steps);
-    // Step 3: Save FDN to the original invoice record in Manager (marks it as credit-noted)
-    await saveMgr(d1.fdn,d1.qrCode,d1.antifakeCode,d1.deviceNo,d1.issuedDate,d1.invoiceId||'');
-    steps[2].st='don'; setProg(steps);
-  }catch(err){
-    console.error(err);showErr('Credit Note: '+err.message);
-    steps.forEach(s=>{if(s.st==='act')s.st='err';});setProg(steps);
-  }
-  btn.disabled=false;
-}
+// Credit-note flow is unified in the "Credit Note" section below (openCreditNoteModal /
+// submitCreditNote, T108). The Submit-tab and Issue-Receipt buttons both call it.
 
 // ── Payment Ways ──────────────────────────────────────────────
 const PAY_MODES=[['102','Cash'],['101','Credit'],['105','Mobile Money'],['106','Visa / Mastercard'],['103','Cheque'],['107','EFT / Bank Transfer'],['108','POS'],['109','RTGS'],['110','Swift Transfer']];
@@ -4300,7 +4222,8 @@ async function doCreateReceipt(managerOnly){
       <strong style="font-size:14px;">&#8629; Issue Credit Note</strong>
       <button onclick="closeCreditNoteModal()" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--gray);">&#10005;</button>
     </div>
-    <div class="fg"><label>Original FDN</label><input id="cnFDN" readonly style="background:var(--bg2);font-family:monospace;"/></div>
+    <div class="fg"><label>Original FDN</label><input id="cnFDN" style="font-family:monospace;"/></div>
+    <div id="cnOriIdNote" style="font-size:10.5px;color:var(--gray);margin:-4px 0 8px;"></div>
     <div class="fg"><label>Your Reference No.</label><input id="cnRef" placeholder="CN-001"/></div>
     <div class="fg"><label>Reason</label>
       <select id="cnReason" onchange="document.getElementById('cnReasonTextRow').style.display=this.value==='105'?'':'none'">
@@ -4329,52 +4252,135 @@ async function doCreateReceipt(managerOnly){
 //  Credit Note
 // ══════════════════════════════════════════════════════════════
 var _cnItems=[];
-function openCreditNoteModal(){
-  const fdn=($('rFDN')||{}).textContent||'';
-  if(!fdn||fdn==='—'){alert('No FDN available — submit to EFRIS first.');return;}
+var _cnOriId='';          // EFRIS internal invoiceId of the original (oriInvoiceId)
+var _cnOriKey='';         // Manager document key of the original (for recording the CN)
+var _cnInvoice=null;      // full original invoice (carries buyer + currency)
+// Resolve the original EFRIS invoiceId from whatever context we have.
+function cnResolveOriId(explicit){
+  if(explicit) return explicit;
+  if(_lastEfrisResult&&_lastEfrisResult.invoiceId) return _lastEfrisResult.invoiceId;
+  if(INV&&INV.CustomFields){ const c=INV.CustomFields; return c['Invoice ID']||c['EFRIS Invoice ID']||c['UGX Inv']||''; }
+  return '';
+}
+// fdn / oriInvoiceId optional — falls back to the Submit-tab (exFDN) or receipt (rFDN) screens.
+function openCreditNoteModal(fdn, oriInvoiceId){
+  fdn=(fdn||'').trim();
+  if(!fdn){ const ex=$('exFDN'), rf=$('rFDN'); fdn=((ex&&ex.textContent)||'').trim(); if(!fdn||fdn==='—') fdn=((rf&&rf.textContent)||'').replace(/CREDIT NOTE/i,'').trim(); }
+  if(!fdn||fdn==='—'){alert('No FDN available — submit to EFRIS first, or use the Credit Note tab to enter an FDN.');return;}
+  _cnOriId=cnResolveOriId(oriInvoiceId);
+  _cnOriKey=(typeof DKEY!=='undefined'&&DKEY)?DKEY:'';
+  _cnInvoice=INV||null;
   sv('cnFDN',fdn);
-  sv('cnRef','CN-'+Date.now());
-  _cnItems=[{itemCode:'',quantity:1,unitPrice:0,orderNumber:0}];
+  // Clean reference: CN-<original reference> (editable), never derived from another invoice's number.
+  const baseRef=(INV&&(INV.Reference||INV.Code))||'';
+  sv('cnRef', baseRef? ('CN-'+baseRef) : ('CN-'+new Date().toISOString().slice(0,10).replace(/-/g,'')));
+  // Pre-fill the lines from the loaded invoice so qty/unit price carry over.
+  if(INV&&INV.Lines&&INV.Lines.length){
+    _cnItems=INV.Lines.map((l,i)=>({itemCode:l.ItemCode||l.Code||'',itemName:l.ItemName||l.Description||'',quantity:l.Qty||1,unitPrice:l.UnitPrice||0,orderNumber:i}));
+  } else {
+    _cnItems=[{itemCode:'',itemName:'',quantity:1,unitPrice:0,orderNumber:0}];
+  }
   cnRenderItems();
   ht('cnResult','');
+  const oid=$('cnOriIdNote'); if(oid) oid.textContent=_cnOriId?('Original invoice ID: '+_cnOriId):'No original invoice ID found — EFRIS may reject; load it via the Credit Note tab.';
   const m=$('cnModal'); if(m){m.style.display='flex';}
 }
 function closeCreditNoteModal(){ const m=$('cnModal'); if(m) m.style.display='none'; }
 function cnRenderItems(){
   const el=$('cnItems'); if(!el) return;
-  let h='<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:4px;"><thead><tr style="background:var(--bg2);"><th style="padding:4px 6px;text-align:left;">Item Code</th><th style="padding:4px 6px;width:60px;">Qty</th><th style="padding:4px 6px;width:90px;">Unit Price</th><th style="padding:4px 6px;width:50px;">Line #</th><th></th></tr></thead><tbody>';
+  let h='<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:4px;"><thead><tr style="background:var(--bg2);"><th style="padding:4px 6px;text-align:left;">Item Code</th><th style="padding:4px 6px;text-align:left;">Name</th><th style="padding:4px 6px;width:54px;">Qty</th><th style="padding:4px 6px;width:84px;">Unit Price</th><th></th></tr></thead><tbody>';
   _cnItems.forEach((it,i)=>{
-    h+='<tr style="border-bottom:1px solid var(--bdr);"><td style="padding:3px;"><input value="'+esc(it.itemCode)+'" style="width:100%;font-size:12px;" oninput="_cnItems['+i+'].itemCode=this.value" placeholder="e.g. ITEM001"/></td>'
+    h+='<tr style="border-bottom:1px solid var(--bdr);"><td style="padding:3px;"><input value="'+esc(it.itemCode)+'" style="width:100%;font-size:12px;" oninput="_cnItems['+i+'].itemCode=this.value" placeholder="e.g. ECT-CUP-001"/></td>'
+      +'<td style="padding:3px;"><input value="'+esc(it.itemName||'')+'" style="width:100%;font-size:12px;" oninput="_cnItems['+i+'].itemName=this.value" placeholder="item name"/></td>'
       +'<td style="padding:3px;"><input type="number" value="'+it.quantity+'" style="width:100%;font-size:12px;" oninput="_cnItems['+i+'].quantity=+this.value"/></td>'
       +'<td style="padding:3px;"><input type="number" value="'+it.unitPrice+'" style="width:100%;font-size:12px;" oninput="_cnItems['+i+'].unitPrice=+this.value"/></td>'
-      +'<td style="padding:3px;"><input type="number" value="'+it.orderNumber+'" style="width:100%;font-size:12px;" oninput="_cnItems['+i+'].orderNumber=+this.value"/></td>'
       +(_cnItems.length>1?'<td><button onclick="_cnItems.splice('+i+',1);cnRenderItems()" style="background:none;border:none;color:#c62828;cursor:pointer;">&#10005;</button></td>':'<td></td>')
       +'</tr>';
   });
   h+='</tbody></table>';
   el.innerHTML=h;
 }
-function cnAddItem(){ _cnItems.push({itemCode:'',quantity:1,unitPrice:0,orderNumber:_cnItems.length}); cnRenderItems(); }
+function cnAddItem(){ _cnItems.push({itemCode:'',itemName:'',quantity:1,unitPrice:0,orderNumber:_cnItems.length}); cnRenderItems(); }
 async function submitCreditNote(){
   const fdn=gvi('cnFDN'); if(!fdn){alert('No FDN');return;}
   const reasonCode=($('cnReason')||{}).value||'102';
-  const reason=reasonCode==='105'?gvi('cnReasonText'):'';
-  if(reasonCode==='105'&&!reason){alert('Enter reason description for "Other"');return;}
+  const reason=reasonCode==='105'?gvi('cnReasonText'):($('cnReason')&&$('cnReason').selectedOptions[0]?$('cnReason').selectedOptions[0].text:'');
+  if(reasonCode==='105'&&!gvi('cnReasonText')){alert('Enter reason description for "Other"');return;}
+  const oriId=cnResolveOriId(_cnOriId);
+  if(!oriId){alert('Original invoice ID (oriInvoiceId) is required by EFRIS. Open the Credit Note tab and "Load original by FDN" so it can be fetched, or credit immediately after submitting.');return;}
+  const ref=gvi('cnRef')||('CN-'+new Date().toISOString().slice(0,10).replace(/-/g,''));
   const btn=$('cnSubmitBtn'); if(btn){btn.disabled=true;btn.textContent='Submitting…';}
-  ht('cnResult','');
+  ht('cnResult','<div class="al ai">Submitting credit note to URA EFRIS…</div>');
   try{
+    // Build a full invoice so the T108 carries item names, units and buyer details.
+    const cnInv = _cnInvoice ? {...{},
+        Currency:_cnInvoice.Currency||'UGX', Reference:ref,
+        CustomerType:_cnInvoice.CustomerType||'b2c', CustomerName:_cnInvoice.CustomerName||(_cnInvoice.Customer&&_cnInvoice.Customer.Name)||'',
+        CustomerTIN:_cnInvoice.CustomerTIN||(_cnInvoice.Customer&&_cnInvoice.Customer.TIN)||'',
+        Lines:_cnItems.map(it=>({ItemName:it.itemName,ItemCode:it.itemCode,Qty:it.quantity,UnitPrice:it.unitPrice}))
+      } : {
+        Currency:'UGX', Reference:ref, CustomerType:'b2c',
+        Lines:_cnItems.map(it=>({ItemName:it.itemName,ItemCode:it.itemCode,Qty:it.quantity,UnitPrice:it.unitPrice}))
+      };
     const r=await fetch(RELAY+'/api/efris/credit-note',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-      originalFDN:fdn,originalInvoiceId:(_lastEfrisResult&&_lastEfrisResult.invoiceId)||'',
-      reasonCode,reason,remarks:gvi('cnRemarks'),referenceNo:gvi('cnRef'),
-      items:_cnItems,
-      config:{tin:CFG.tin,deviceNo:CFG.deviceNo,efrisPassword:CFG.efrisPassword,mode:CFG.sandbox?'sandbox':'production'}
+      originalFDN:fdn,originalInvoiceId:oriId,
+      reasonCode,reason,remarks:gvi('cnRemarks'),referenceNo:ref,
+      invoice:cnInv, items:_cnItems,
+      config:{tin:CFG.tin,deviceNo:CFG.deviceNo,efrisPassword:CFG.efrisPassword,mode:CFG.sandbox?'sandbox':'production',businessName:CFG.legalName,tradeName:CFG.tradeName,businessAddress:CFG.address,brn:CFG.brn,phone:CFG.phone,email:CFG.email,vatRegistered:CFG.vatReg}
     })});
     const d=await r.json();
-    ht('cnResult',d.success
-      ?'<div class="st ss">&#10003; Credit note submitted — FDN: <strong>'+(d.fdn||'—')+'</strong>'+(d.referenceNo?', Ref: '+esc(d.referenceNo):'')+'</div>'
-      :'<div class="st se">&#10005; '+esc(d.error||'Failed')+'</div>');
+    if(!d.success){ ht('cnResult','<div class="st se">&#10005; '+esc(d.error||'Failed')+'</div>'); if(btn){btn.disabled=false;btn.innerHTML='&#8629; Submit Credit Note';} return; }
+    let mgrMsg='';
+    // Record the credit note in Manager's Credit Notes tab (with the CN's own EFRIS data).
+    const ep=CFG.managerEndpoint||(typeof MGR_EP!=='undefined'?MGR_EP:''), tk=CFG.accessToken||(typeof MGR_TK!=='undefined'?MGR_TK:'');
+    if(ep&&tk&&_cnOriKey){
+      try{
+        const cr=await fetch(RELAY+'/api/manager/create-credit-note',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({managerEndpoint:ep,accessToken:tk,originalKey:_cnOriKey,reason,referenceNo:ref,
+            efrisFdn:d.fdn,efrisInvoiceId:d.invoiceId||'',efrisAntifake:d.antifakeCode||'',efrisQr:(d.validationUrl||d.qrCode||''),efrisSubDate:new Date().toISOString().slice(0,10)})});
+        const cd=await cr.json();
+        mgrMsg = cd.success ? '<div class="st ss">&#10003; Recorded in Manager Credit Notes (ref: '+esc(ref)+')</div>'
+                            : '<div class="al ai">&#9888; Manager record skipped: '+esc(cd.error||'unknown')+'</div>';
+      }catch(e){ mgrMsg='<div class="al ai">&#9888; Manager record: network error</div>'; }
+    }
+    ht('cnResult','<div class="st ss">&#10003; Credit note submitted — FDN: <strong>'+esc(d.fdn||'—')+'</strong>'+(d.referenceNo?', Ref: '+esc(d.referenceNo):'')
+      +'</div>'+(d.validationUrl?'<a href="'+esc(d.validationUrl)+'" target="_blank" rel="noopener" style="font-size:11px;color:#1565c0;">&#128279; Verify on URA EFRIS Portal</a>':'')
+      +'<div style="font-size:11px;color:var(--gray);margin-top:4px;">Status will show <strong>Pending</strong> on the URA portal until approved; the Credit Note No. is assigned on approval.</div>'+mgrMsg);
   }catch(e){ ht('cnResult','<div class="st se">'+esc(e.message)+'</div>'); }
-  if(btn){btn.disabled=false;btn.textContent='&#8629; Submit Credit Note';}
+  if(btn){btn.disabled=false;btn.innerHTML='&#8629; Submit Credit Note';}
+}
+
+// ── Independent Credit Note tab (enter an FDN directly) ──────────
+function cnTabInit(){ ht('cnTabInfo',''); }
+async function cnTabLookup(){
+  const fdn=gvi('cnTabFdn').trim();
+  if(!fdn){alert('Enter the original FDN');return;}
+  ht('cnTabInfo','<span style="color:var(--gray);">Looking up…</span>');
+  try{
+    const r=await fetch(RELAY+'/api/submission-log/by-fdn/'+encodeURIComponent(fdn));
+    const d=await r.json();
+    if(d.success){
+      sv('cnTabOriId',d.invoiceId||'');
+      ht('cnTabInfo','<span class="st ss" style="display:inline-block;">&#10003; Found: '+esc(d.reference||'(no ref)')+(d.customerName?' — '+esc(d.customerName):'')+(d.amount?' — '+esc(d.currency)+' '+Number(d.amount).toLocaleString():'')+'</span>');
+    } else {
+      ht('cnTabInfo','<span class="al ai" style="display:inline-block;">'+esc(d.error||'Not found')+'</span>');
+    }
+  }catch(e){ ht('cnTabInfo','<span class="st se">'+esc(e.message)+'</span>'); }
+}
+function cnTabContinue(){
+  const fdn=gvi('cnTabFdn').trim();
+  const oriId=gvi('cnTabOriId').trim();
+  if(!fdn){alert('Enter the original FDN');return;}
+  if(!oriId){if(!confirm('No original invoice ID set — EFRIS will likely reject the credit note. Continue anyway?'))return;}
+  // Open the form in independent mode: no loaded Manager invoice, manual lines.
+  _cnInvoice=null; _cnOriKey=''; _cnOriId=oriId;
+  sv('cnFDN',fdn);
+  sv('cnRef','CN-'+fdn);
+  _cnItems=[{itemCode:'',itemName:'',quantity:1,unitPrice:0,orderNumber:0}];
+  cnRenderItems();
+  ht('cnResult','');
+  const oid=$('cnOriIdNote'); if(oid) oid.textContent=oriId?('Original invoice ID: '+oriId):'No original invoice ID — EFRIS may reject this credit note.';
+  const m=$('cnModal'); if(m) m.style.display='flex';
 }
 
 // ══════════════════════════════════════════════════════════════

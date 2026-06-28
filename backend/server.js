@@ -579,6 +579,88 @@ async function isValidEfrisUnit(code, tin, deviceNo, session, eu) {
   return units.some(u => u.code.toUpperCase() === c);
 }
 
+// ── Registered-goods map (T127) ──────────────────────────────────────────────
+// Returns { GOODSCODE -> { measureUnit, commodityCategoryId, commodityCategoryName,
+// unitPrice, goodsName } } for goods registered under this taxpayer. This is the
+// authoritative source for a line's unit of measure: invoice/credit-note lines MUST
+// echo the SAME measureUnit the item was registered with, otherwise EFRIS renders the
+// wrong unit (e.g. "Stick" when we default to 101) and credit notes are rejected with
+// "unit of measure does not match goods maintenance". Cached briefly per TIN.
+const _goodsMapCache = {};
+async function getRegisteredGoodsMap(tin, deviceNo, session, eu) {
+  const cacheKey = String(tin || '');
+  const now = Date.now();
+  const cached = _goodsMapCache[cacheKey];
+  if (cached && (now - cached.ts) < 120000) return cached.map;
+  const map = {};
+  try {
+    let pageNo = 1;
+    for (let guard = 0; guard < 25; guard++) {
+      const payload = { goodsCode: '', goodsName: '', commodityCategoryCode: '', pageNo: String(pageNo), pageSize: '99' };
+      const r = await efrisCall(eu, efrisEnvEnc('T127', payload, tin, deviceNo, session.aesKey, session.privatePem));
+      const rc = r.data?.returnStateInfo?.returnCode;
+      if (rc !== '00' && rc !== '45') break;
+      let items = [];
+      if (r.data?.data?.content) {
+        try {
+          const parsed = JSON.parse(aesDecryptStr(r.data.data.content, session.aesKey));
+          items = parsed.records || parsed.goodsList || parsed.list || (Array.isArray(parsed) ? parsed : []);
+        } catch (e) { break; }
+      }
+      if (!items.length) break;
+      for (const it of items) {
+        const code = String(it.goodsCode || it.itemCode || it.code || '').trim();
+        if (!code) continue;
+        map[code.toUpperCase()] = {
+          measureUnit: String(it.measureUnit || it.unitOfMeasure || it.unit || '').trim(),
+          commodityCategoryId: String(it.commodityCategoryId || it.commodityCategoryCode || '').trim(),
+          commodityCategoryName: String(it.commodityCategoryName || '').trim(),
+          unitPrice: it.unitPrice != null ? String(it.unitPrice) : '',
+          goodsName: String(it.goodsName || it.name || '').trim(),
+        };
+      }
+      if (items.length < 99) break;
+      pageNo++;
+    }
+  } catch (e) { console.log(`   getRegisteredGoodsMap error: ${e.message}`); }
+  _goodsMapCache[cacheKey] = { ts: now, map };
+  return map;
+}
+
+// Annotate invoice/credit-note lines with the EFRIS-registered unit + commodity so
+// buildT109 stops defaulting unitOfMeasure to '101' (Stick). Mutates lines in place.
+function annotateLinesWithRegisteredGoods(invoice, goodsMap) {
+  if (!invoice || !Array.isArray(invoice.Lines) || !goodsMap) return;
+  for (const l of invoice.Lines) {
+    const code = String(l.ItemCode || l.Code || l.itemCode || '').trim().toUpperCase();
+    const g = code && goodsMap[code];
+    if (!g) continue;
+    if (g.measureUnit && !l.EFRISUnitOfMeasure) l.EFRISUnitOfMeasure = g.measureUnit;
+    if (g.commodityCategoryId && !l.EFRISCommodityCode) l.EFRISCommodityCode = g.commodityCategoryId;
+    if (g.commodityCategoryName && !l.EFRISCommodityName) l.EFRISCommodityName = g.commodityCategoryName;
+  }
+}
+
+// Resolve a line's EFRIS unit-of-measure code. Priority:
+//   1. EFRISUnitOfMeasure — set from the registered goods record (authoritative).
+//   2. cfg.defaultUnitOfMeasure — taxpayer default (ignored if it's the bad '101').
+//   3. The line's Manager unit name resolved against uom.json (e.g. "Piece" -> PCE).
+//   4. 'PCE' (Piece) — a safe default. NEVER '101' (that renders as "Stick").
+function resolveLineUom(l, cfg) {
+  const reg = String(l.EFRISUnitOfMeasure || '').trim();
+  if (reg) return reg;
+  const def = String((cfg && cfg.defaultUnitOfMeasure) || '').trim();
+  if (def && def !== '101') return def;
+  const unitName = String(l.Unit || l.UnitName || '').trim().toLowerCase();
+  if (unitName) {
+    try {
+      const u = getUnits().find(x => String(x.name || x.desc || '').trim().toLowerCase() === unitName);
+      if (u && u.code) return u.code;
+    } catch (e) {}
+  }
+  return 'PCE';
+}
+
 function buildT109(invoice, cfg) {
   const vat = !!cfg.vatRegistered;
   const isRefund = !!(invoice.IsRefund || invoice.isRefund);
@@ -610,7 +692,7 @@ function buildT109(invoice, cfg) {
     return {
       item: String(l.ItemName || l.Description || 'Service').slice(0, 100),
       itemCode: String(l.ItemCode || l.Code || ('ITEM' + (i + 1))).slice(0, 50),
-      qty: String(qty), unitOfMeasure: l.EFRISUnitOfMeasure || cfg.defaultUnitOfMeasure || '101',
+      qty: String(qty), unitOfMeasure: resolveLineUom(l, cfg),
       unitPrice: r2(unitPrice), total: r2(total), taxRate, taxRule, tax: String(tax),
       discountTotal: '', discountTaxRate: '', orderNumber: String(i),
       discountFlag: '2', deemedFlag: '2', exciseFlag: '2',
@@ -673,6 +755,63 @@ function buildT109(invoice, cfg) {
       ? invoice.PayWays.map((pw, i) => ({ paymentMode: String(pw.mode || '101'), paymentAmount: r2(pw.amount || 0), orderNumber: String(i + 1) }))
       : [{ paymentMode: String(invoice.PaymentMode || '101'), paymentAmount: r2(gross), orderNumber: '1' }],
     extend: {}
+  };
+}
+
+// ── Build a T108 credit-note application ─────────────────────────────────────
+// EFRIS credit notes reuse the T109 line/buyer/tax structure but: (1) amounts are
+// NEGATIVE (qty, total, tax, summary), (2) lines MUST carry the registered unit of
+// measure (annotate the invoice first), and (3) they add credit-note fields keyed on
+// the ORIGINAL invoice (oriInvoiceId/oriInvoiceNo) plus a reasonCode. Lands in the
+// URA Credit Notes register (status Pending until URA approves).
+//   opts: { oriInvoiceId, oriInvoiceNo, reasonCode, reason, sellersReferenceNo }
+function buildT108(invoice, cfg, opts) {
+  const o = opts || {};
+  const base = buildT109({ ...invoice, IsRefund: true }, cfg);
+  const neg = s => { const n = parseFloat(s) || 0; return (n === 0 ? 0 : -Math.abs(n)).toFixed(2); };
+  const negQty = q => { const n = parseFloat(q) || 0; return String(n === 0 ? 0 : -Math.abs(n)); };
+  const goodsDetails = base.goodsDetails.map(g => ({
+    ...g,
+    qty: negQty(g.qty),
+    total: neg(g.total),
+    tax: String(neg(g.tax)),
+  }));
+  const taxDetails = (base.taxDetails || []).map(t => ({
+    ...t,
+    netAmount: neg(t.netAmount),
+    taxAmount: neg(t.taxAmount),
+    grossAmount: neg(t.grossAmount),
+  }));
+  const summary = {
+    ...base.summary,
+    netAmount: neg(base.summary.netAmount),
+    taxAmount: neg(base.summary.taxAmount),
+    grossAmount: neg(base.summary.grossAmount),
+    remarks: o.remarks || base.summary.remarks || '',
+  };
+  const payWay = (base.payWay || []).map(p => ({ ...p, paymentAmount: neg(p.paymentAmount) }));
+  const now = new Date();
+  const p = n => String(n).padStart(2, '0');
+  const applicationTime = `${now.getFullYear()}-${p(now.getMonth()+1)}-${p(now.getDate())} ${p(now.getHours())}:${p(now.getMinutes())}:${p(now.getSeconds())}`;
+  return {
+    oriInvoiceId: String(o.oriInvoiceId || ''),
+    oriInvoiceNo: String(o.oriInvoiceNo || ''),
+    reasonCode: String(o.reasonCode || '102'),
+    reason: String(o.reason || ''),
+    applicationTime,
+    invoiceApplyCategoryCode: '101',         // 101 = credit note against an original invoice
+    currency: invoice.Currency || 'UGX',
+    contactName: '', contactMobileNum: '', source: '103', remarks: o.remarks || '',
+    sellersReferenceNo: String(o.sellersReferenceNo || invoice.Reference || ''),
+    basicInformation: base.basicInformation,
+    sellerDetails: base.sellerDetails,
+    buyerDetails: base.buyerDetails,
+    goodsDetails,
+    taxDetails,
+    summary,
+    payWay,
+    importServicesSeller: {},
+    extend: {},
   };
 }
 
@@ -1664,6 +1803,14 @@ app.post('/api/efris/submit-invoice', rateLimit(30), async (req, res) => {
     if (lines.length === 0) {
       return res.json({ success: false, error: 'This document has no line items. If this is a payment receipt that clears an invoice, submit the original sales invoice to EFRIS instead.' });
     }
+    const session = await getSession(config.tin, config.deviceNo, config.efrisPassword, eu);
+    if (!session.aesKey) throw new Error('No AES key available to encrypt T109');
+    // Echo each line's unit-of-measure (and commodity) from the registered goods record
+    // so EFRIS shows the correct unit instead of defaulting to '101' (Stick).
+    try {
+      const goodsMap = await getRegisteredGoodsMap(config.tin, config.deviceNo, session, eu);
+      annotateLinesWithRegisteredGoods(invoice, goodsMap);
+    } catch (e) { console.log(`   goods-map annotate skipped: ${e.message}`); }
     // Warn if any line is falling back to the auto-generated ITEM code (means the
     // Manager item has no EFRIS product code set, and EFRIS will reject it as rc:41).
     const t109data = buildT109(invoice, config);
@@ -1671,9 +1818,7 @@ app.post('/api/efris/submit-invoice', rateLimit(30), async (req, res) => {
     if (missingCodes.length) {
       console.log(`   ⚠ T109: ${missingCodes.length} line(s) have auto-generated itemCode (no EFRIS product code on Manager item): ${missingCodes.map(g=>g.item).join(', ')}`);
     }
-    t109data.goodsDetails.forEach(g => console.log(`   T109 line: item="${g.item}" itemCode="${g.itemCode}" taxRule="${g.taxRule}"`));
-    const session = await getSession(config.tin, config.deviceNo, config.efrisPassword, eu);
-    if (!session.aesKey) throw new Error('No AES key available to encrypt T109');
+    t109data.goodsDetails.forEach(g => console.log(`   T109 line: item="${g.item}" itemCode="${g.itemCode}" uom="${g.unitOfMeasure}" taxRule="${g.taxRule}"`));
     // rc 15 ("Data decryption error") is a transient URA-side fault — our ciphertext
     // is verified-correct — so retry it (same as stock-in/adjust).
     let t109, rc, rm;
@@ -1808,7 +1953,7 @@ app.post('/api/efris/my-details', async (req, res) => {
 
 // ── Credit Note (T108) ────────────────────────────────────────
 app.post('/api/efris/credit-note', rateLimit(30), async (req, res) => {
-  const { originalFDN, originalInvoiceId, reasonCode, reason, remarks, referenceNo, items, config } = req.body || {};
+  const { originalFDN, originalInvoiceId, reasonCode, reason, remarks, referenceNo, items, invoice, config } = req.body || {};
   if (!originalFDN || !config || !config.tin) return res.status(400).json({ success: false, error: 'originalFDN and config required' });
   if (!originalInvoiceId) return res.status(400).json({ success: false, error: 'Credit note requires the original invoice ID (oriInvoiceId). Enter the original FDN in the "Fiscal Document Number" custom field on the original invoice before raising a credit note.' });
   const eu = config.mode === 'production'
@@ -1817,21 +1962,36 @@ app.post('/api/efris/credit-note', rateLimit(30), async (req, res) => {
   try {
     const session = await getSession(config.tin, config.deviceNo, config.efrisPassword, eu);
     if (!session.aesKey) throw new Error('No AES key for T108');
-    const t108data = {
-      oriInvoiceId: originalInvoiceId || '',
+    // Prefer a full invoice object (carries item names, tax, buyer details). Fall back
+    // to the legacy `items` array, reconstructing a minimal invoice from it.
+    const cnInvoice = invoice && invoice.Lines
+      ? { ...invoice }
+      : {
+          Currency: (config && config.currency) || 'UGX',
+          Reference: referenceNo || '',
+          CustomerType: (req.body && req.body.customerType) || 'b2c',
+          Lines: (items || []).map((item) => ({
+            ItemName: item.itemName || item.name || '',
+            ItemCode: String(item.itemCode || ''),
+            Qty: parseFloat(item.quantity || 1) || 1,
+            UnitPrice: parseFloat(item.unitPrice || 0) || 0,
+          })),
+        };
+    // Echo the registered unit of measure onto each line so EFRIS doesn't reject the
+    // credit note with "unit of measure does not match goods maintenance".
+    try {
+      const goodsMap = await getRegisteredGoodsMap(config.tin, config.deviceNo, session, eu);
+      annotateLinesWithRegisteredGoods(cnInvoice, goodsMap);
+    } catch (e) { console.log(`   CN goods-map annotate skipped: ${e.message}`); }
+    const t108data = buildT108(cnInvoice, config, {
+      oriInvoiceId: originalInvoiceId,
       oriInvoiceNo: originalFDN,
       reasonCode: reasonCode || '102',
       reason: reason || '',
-      invoiceApplyCategoryCode: '101',
       remarks: remarks || '',
-      sellersReferenceNo: referenceNo || ('CN-' + Date.now()),
-      goodsDetails: (items || []).map((item, i) => ({
-        itemCode: String(item.itemCode || ''),
-        qty: String(item.quantity || 1),
-        unitPrice: String(item.unitPrice || 0),
-        orderNumber: String(item.orderNumber !== undefined ? item.orderNumber : i),
-      })),
-    };
+      sellersReferenceNo: referenceNo || cnInvoice.Reference || ('CN-' + Date.now()),
+    });
+    t108data.goodsDetails.forEach(g => console.log(`   T108 line: item="${g.item}" itemCode="${g.itemCode}" uom="${g.unitOfMeasure}" qty=${g.qty} total=${g.total}`));
     const t108 = await efrisCall(eu, efrisEnvEnc('T108', t108data, config.tin, config.deviceNo, session.aesKey, session.privatePem));
     const rc = t108.data && t108.data.returnStateInfo ? t108.data.returnStateInfo.returnCode : null;
     const rm = t108.data && t108.data.returnStateInfo ? t108.data.returnStateInfo.returnMessage : '';
@@ -2098,7 +2258,7 @@ app.post('/api/efris/save-to-manager', async (req, res) => {
 
 // Create a credit note in Manager linked to the original invoice/receipt
 app.post('/api/manager/create-credit-note', async (req, res) => {
-  const { managerEndpoint, accessToken, originalKey, originalDocType, reason, efrisFdn, efrisInvoiceId, efrisAntifake, efrisQr, efrisSubDate } = req.body || {};
+  const { managerEndpoint, accessToken, originalKey, originalDocType, reason, referenceNo, efrisFdn, efrisInvoiceId, efrisAntifake, efrisQr, efrisSubDate } = req.body || {};
   if (!managerEndpoint || !accessToken || !originalKey) return res.status(400).json({ success: false, error: 'Missing required fields' });
   const ep = normEp(managerEndpoint);
   // Overwrite a credit-note form's EFRIS custom fields with the CREDIT NOTE's own
@@ -2138,15 +2298,23 @@ app.post('/api/manager/create-credit-note', async (req, res) => {
   // a negative sales invoice). POST directly — Manager form endpoints 500/404 on a
   // bare GET, so we must not GET-probe them.
   let cfMeta = null; try { cfMeta = await mgrTextCustomFields(ep, accessToken); } catch (_) {}
+  const today = new Date().toISOString().slice(0, 10);
+  // Reference: prefer the caller's clean reference; never fall back to the raw key.
+  const cnRef = referenceNo || ('CN-' + (origForm.Reference || origForm.InvoiceNumber || ''));
   const cnForm = {
-    Date: new Date().toISOString().slice(0, 10),
-    Reference: 'CN-' + (origForm.Reference || origForm.InvoiceNumber || originalKey.slice(0, 8)),
+    Date: today, IssueDate: today,   // Manager's credit-note form uses one of these — set both
+    Reference: cnRef,
     Description: reason + (efrisFdn ? ' | Credit Note FDN: ' + efrisFdn : ''),
     HasLineDescription: true, QuantityColumn: true, UnitPriceColumn: true,
   };
   if (origForm.Customer) cnForm.Customer = origForm.Customer;
   else if (origForm.Contact) cnForm.Contact = origForm.Contact;
-  if (Array.isArray(origForm.Lines)) cnForm.Lines = origForm.Lines.map(l => ({ Item: l.Item, LineDescription: l.LineDescription, Qty: parseFloat(l.Qty) || 1, UnitPrice: parseFloat(l.UnitPrice) || 0 }));
+  // Invoice/receipt lines store the price as SalesUnitPrice (UnitPrice is usually empty),
+  // which is why the credit note showed 0.00. Read both and write both.
+  if (Array.isArray(origForm.Lines)) cnForm.Lines = origForm.Lines.map(l => {
+    const price = parseFloat(l.SalesUnitPrice != null ? l.SalesUnitPrice : (l.UnitPrice != null ? l.UnitPrice : l.Amount)) || 0;
+    return { Item: l.Item, LineDescription: l.LineDescription, Qty: parseFloat(l.Qty) || 1, UnitPrice: price, SalesUnitPrice: price };
+  });
   if (cfMeta) applyCnEfris(cnForm, cfMeta);
   const cnPaths = ['/credit-note-form', '/sales-credit-note-form', '/customer-credit-note-form'];
   let lastCnErr = '';
@@ -2171,11 +2339,14 @@ app.post('/api/manager/create-credit-note', async (req, res) => {
   try {
     const fallbackForm = Object.assign({}, origForm);
     delete fallbackForm.Key; delete fallbackForm.key; delete fallbackForm.id; delete fallbackForm.UniqueName;
-    fallbackForm.Date = new Date().toISOString().slice(0, 10);
-    fallbackForm.Reference = 'CN-' + (origForm.Reference || '');
+    fallbackForm.Date = today; fallbackForm.IssueDate = today;
+    fallbackForm.Reference = cnRef;
     fallbackForm.Description = reason + (efrisFdn ? ' | Credit Note FDN: ' + efrisFdn : '');
     if (fallbackForm.Lines) {
-      fallbackForm.Lines = fallbackForm.Lines.map(l => ({ ...l, Qty: -(parseFloat(l.Qty) || 1), UnitPrice: parseFloat(l.UnitPrice) || 0 }));
+      fallbackForm.Lines = fallbackForm.Lines.map(l => {
+        const price = parseFloat(l.SalesUnitPrice != null ? l.SalesUnitPrice : (l.UnitPrice != null ? l.UnitPrice : l.Amount)) || 0;
+        return { ...l, Qty: -(parseFloat(l.Qty) || 1), UnitPrice: price, SalesUnitPrice: price };
+      });
     }
     // Overwrite the cloned (original's) EFRIS custom fields with the credit note's.
     try { const cfMeta = await mgrTextCustomFields(ep, accessToken); applyCnEfris(fallbackForm, cfMeta); } catch (_) {}
@@ -2547,11 +2718,27 @@ app.get('/api/submission-log', (req, res) => {
     const filtered = q ? log.filter(e =>
       (e.fdn || '').toLowerCase().includes(q) ||
       (e.invoiceId || '').toLowerCase().includes(q) ||
+      (e.reference || '').toLowerCase().includes(q) ||
       (e.customerName || '').toLowerCase().includes(q)
     ) : log;
     const total = filtered.length;
     const items = filtered.slice((page - 1) * limit, page * limit);
     res.json({ success: true, total, page, limit, items });
+  } catch(e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// Look up a previously-submitted document by FDN (from our local log) so the
+// independent Credit Note tab can resolve the original's EFRIS invoiceId + reference.
+app.get('/api/submission-log/by-fdn/:fdn', (req, res) => {
+  try {
+    let log = [];
+    try { log = JSON.parse(fs.readFileSync(SUBMISSION_LOG_FILE, 'utf8')); } catch(e) {}
+    const fdn = String(req.params.fdn || '').trim();
+    const hit = log.find(e => String(e.fdn || '').trim() === fdn);
+    if (!hit) return res.json({ success: false, error: 'FDN not found in local submission history. Enter the original invoice ID manually if you have it.' });
+    res.json({ success: true, fdn: hit.fdn, invoiceId: hit.invoiceId || '', reference: hit.reference || '', customerName: hit.customerName || '', amount: hit.totalAmount || 0, currency: hit.currency || 'UGX' });
   } catch(e) {
     res.status(500).json({ success: false, error: e.message });
   }
